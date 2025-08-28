@@ -1,0 +1,1484 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Sistema Distribuidora</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+            background: #0f1419;
+            color: #ffffff;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 280px;
+            height: 100vh;
+            background: linear-gradient(180deg, #1a1f2e 0%, #0f1419 100%);
+            border-right: 1px solid #2a3441;
+            z-index: 1000;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: 24px 20px;
+            border-bottom: 1px solid #2a3441;
+            flex-shrink: 0;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 18px;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .nav-menu {
+            padding: 20px 0;
+            flex: 1;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            color: #8892b0;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+            cursor: pointer;
+        }
+
+        .nav-item:hover {
+            background: rgba(102, 126, 234, 0.1);
+            color: #667eea;
+            border-left-color: #667eea;
+        }
+
+        .nav-item.active {
+            background: rgba(102, 126, 234, 0.15);
+            color: #667eea;
+            border-left-color: #667eea;
+        }
+
+        .nav-icon {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .sidebar-bottom {
+            padding: 20px;
+            border-top: 1px solid #2a3441;
+            flex-shrink: 0;
+        }
+
+        .bottom-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .btn-sidebar {
+            width: 100%;
+            justify-content: flex-start;
+            font-size: 14px;
+            padding: 12px 16px;
+        }
+
+        .upload-status-container {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-top: 8px;
+        }
+
+        .upload-status {
+            font-size: 11px;
+            font-weight: 500;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: rgba(102, 126, 234, 0.1);
+            color: #8892b0;
+            text-align: center;
+            min-height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .main-content {
+            margin-left: 280px;
+            min-height: 100vh;
+            background: #0f1419;
+        }
+
+        .top-bar {
+            background: #1a1f2e;
+            border-bottom: 1px solid #2a3441;
+            padding: 16px 32px;
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .page-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #ffffff;
+            flex: 1;
+        }
+
+        .top-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-secondary {
+            background: #2a3441;
+            color: #8892b0;
+            border: 1px solid #3a4553;
+        }
+
+        .btn-secondary:hover {
+            background: #3a4553;
+            color: #ffffff;
+        }
+
+        .content-area {
+            padding: 32px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #1a1f2e 0%, #252b3a 100%);
+            border: 1px solid #2a3441;
+            border-radius: 16px;
+            padding: 24px;
+            transition: all 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+            border-color: #667eea;
+        }
+
+        .stat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+
+        .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            color: white;
+        }
+
+        .stat-icon.pending {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .stat-icon.confirmed {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+
+        .stat-icon.total {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+        }
+
+        .stat-icon.revenue {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 4px;
+        }
+
+        .stat-label {
+            color: #8892b0;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .stat-change {
+            font-size: 12px;
+            font-weight: 600;
+            padding: 4px 8px;
+            border-radius: 6px;
+            background: rgba(67, 233, 123, 0.1);
+            color: #43e97b;
+        }
+
+        .pedidos-container {
+            background: #1a1f2e;
+            border: 1px solid #2a3441;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+
+        .pedidos-header {
+            padding: 24px 32px;
+            border-bottom: 1px solid #2a3441;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .pedidos-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        .pedidos-content {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .pedido-card {
+            border-bottom: 1px solid #2a3441;
+            transition: all 0.3s ease;
+        }
+
+        .pedido-card:last-child {
+            border-bottom: none;
+        }
+
+        .pedido-card:hover {
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .pedido-header {
+            padding: 20px 32px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .pedido-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 20px;
+            flex: 1;
+        }
+
+        .pedido-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .pedido-label {
+            font-size: 12px;
+            color: #8892b0;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .pedido-value {
+            font-weight: 600;
+            color: #ffffff;
+            font-size: 14px;
+        }
+
+        .pedido-id {
+            color: #667eea;
+            font-family: 'Monaco', 'Menlo', monospace;
+        }
+
+        .total-destacado {
+            font-size: 16px;
+            font-weight: 700;
+            color: #43e97b;
+        }
+
+        .estado-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .estado-pendiente {
+            background: rgba(245, 87, 108, 0.2);
+            color: #f5576c;
+            border: 1px solid rgba(245, 87, 108, 0.3);
+        }
+
+        .estado-confirmado {
+            background: rgba(67, 233, 123, 0.2);
+            color: #43e97b;
+            border: 1px solid rgba(67, 233, 123, 0.3);
+        }
+
+        .estado-cancelado {
+            background: rgba(139, 146, 176, 0.2);
+            color: #8892b0;
+            border: 1px solid rgba(139, 146, 176, 0.3);
+        }
+
+        .expand-icon {
+            color: #8892b0;
+            transition: transform 0.3s ease;
+            font-size: 16px;
+        }
+
+        .pedido-card[open] .expand-icon {
+            transform: rotate(180deg);
+        }
+
+        .detalles-container {
+            padding: 0 32px 24px 32px;
+            background: rgba(15, 20, 25, 0.5);
+        }
+
+        .detalles-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+
+        .detalles-table th {
+            background: #252b3a;
+            color: #8892b0;
+            padding: 12px 16px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid #2a3441;
+        }
+
+        .detalles-table td {
+            padding: 12px 16px;
+            border-bottom: 1px solid #2a3441;
+            color: #ffffff;
+            font-size: 14px;
+        }
+
+        .detalles-table tr:hover {
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .precio {
+            text-align: right;
+            font-weight: 600;
+            color: #43e97b;
+            font-family: 'Monaco', 'Menlo', monospace;
+        }
+
+        .cantidad {
+            text-align: center;
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .acciones-pedido {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #2a3441;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .estado-selector {
+            padding: 8px 12px;
+            border: 1px solid #3a4553;
+            border-radius: 8px;
+            background: #252b3a;
+            color: #ffffff;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .estado-selector:hover {
+            border-color: #667eea;
+        }
+
+        .estado-selector:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .loading-estado {
+            font-size: 12px;
+            color: #8892b0;
+            font-style: italic;
+        }
+
+        .observacion {
+            background: rgba(245, 87, 108, 0.1);
+            border: 1px solid rgba(245, 87, 108, 0.2);
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-style: italic;
+            color: #f5576c;
+            font-size: 14px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #8892b0;
+            font-size: 16px;
+        }
+
+        .error {
+            background: rgba(245, 87, 108, 0.1);
+            border: 1px solid rgba(245, 87, 108, 0.2);
+            color: #f5576c;
+            padding: 24px;
+            border-radius: 12px;
+            margin: 20px;
+            text-align: center;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        /* ===== MODO CLARO ===== */
+        body.light-mode {
+            background: #f8fafc;
+            color: #1e293b;
+        }
+
+        body.light-mode .sidebar {
+            background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+            border-right: 1px solid #e2e8f0;
+        }
+
+        body.light-mode .sidebar-header {
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        body.light-mode .sidebar-bottom {
+            border-top: 1px solid #e2e8f0;
+        }
+
+        body.light-mode .logo {
+            color: #1e293b;
+        }
+
+        body.light-mode .nav-item {
+            color: #64748b;
+        }
+
+        body.light-mode .nav-item:hover {
+            background: rgba(102, 126, 234, 0.1);
+            color: #667eea;
+            border-left-color: #667eea;
+        }
+
+        body.light-mode .nav-item.active {
+            background: rgba(102, 126, 234, 0.15);
+            color: #667eea;
+            border-left-color: #667eea;
+        }
+
+        body.light-mode .main-content {
+            background: #f8fafc;
+        }
+
+        body.light-mode .top-bar {
+            background: #ffffff;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        body.light-mode .page-title {
+            color: #1e293b;
+        }
+
+        body.light-mode .btn-secondary {
+            background: #f1f5f9;
+            color: #64748b;
+            border: 1px solid #e2e8f0;
+        }
+
+        body.light-mode .btn-secondary:hover {
+            background: #e2e8f0;
+            color: #1e293b;
+        }
+
+        body.light-mode .upload-status {
+            background: rgba(102, 126, 234, 0.1);
+            color: #64748b;
+        }
+
+        body.light-mode .stat-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border: 1px solid #e2e8f0;
+        }
+
+        body.light-mode .stat-card:hover {
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
+            border-color: #667eea;
+        }
+
+        body.light-mode .stat-value {
+            color: #1e293b;
+        }
+
+        body.light-mode .stat-label {
+            color: #64748b;
+        }
+
+        body.light-mode .pedidos-container {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+        }
+
+        body.light-mode .pedidos-header {
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        body.light-mode .pedidos-title {
+            color: #1e293b;
+        }
+
+        body.light-mode .pedido-card {
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        body.light-mode .pedido-card:hover {
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        body.light-mode .pedido-label {
+            color: #64748b;
+        }
+
+        body.light-mode .pedido-value {
+            color: #1e293b;
+        }
+
+        body.light-mode .expand-icon {
+            color: #64748b;
+        }
+
+        body.light-mode .detalles-container {
+            background: rgba(248, 250, 252, 0.5);
+        }
+
+        body.light-mode .detalles-table th {
+            background: #f1f5f9;
+            color: #64748b;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        body.light-mode .detalles-table td {
+            border-bottom: 1px solid #e2e8f0;
+            color: #1e293b;
+        }
+
+        body.light-mode .detalles-table tr:hover {
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        body.light-mode .estado-selector {
+            border: 1px solid #e2e8f0;
+            background: #f1f5f9;
+            color: #1e293b;
+        }
+
+        body.light-mode .estado-selector:hover {
+            border-color: #667eea;
+        }
+
+        body.light-mode .estado-selector:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        body.light-mode .loading-estado {
+            color: #64748b;
+        }
+
+        body.light-mode .loading {
+            color: #64748b;
+        }
+
+        /* Scrollbar en modo claro */
+        body.light-mode ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+
+        body.light-mode ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+        }
+
+        body.light-mode ::-webkit-scrollbar-thumb:hover {
+            background: #667eea;
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.3s ease;
+            }
+
+            .sidebar.open {
+                transform: translateX(0);
+            }
+
+            .main-content {
+                margin-left: 0;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            }
+
+            .pedido-info {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .content-area {
+                padding: 20px;
+            }
+
+            .top-bar {
+                padding: 16px 20px;
+            }
+
+            .pedidos-header {
+                padding: 20px;
+            }
+
+            .pedido-header {
+                padding: 16px 20px;
+            }
+
+            .detalles-container {
+                padding: 0 20px 20px 20px;
+            }
+
+            .top-actions {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .btn-sidebar {
+                font-size: 13px;
+                padding: 10px 14px;
+            }
+
+            .upload-status {
+                font-size: 10px;
+            }
+        }
+
+        /* Scrollbar personalizado */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1a1f2e;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #3a4553;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #667eea;
+        }
+
+        /* Animaciones */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .pedido-card {
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        .stat-card {
+            animation: fadeIn 0.5s ease-out;
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <div class="logo-icon">📋</div>
+                <span>Distribuidora</span>
+            </div>
+        </div>
+        <nav class="nav-menu">
+            <div class="nav-item active" onclick="showPedidos('pending')">
+                <div class="nav-icon">⏳</div>
+                <span>Pedidos Pendientes</span>
+            </div>
+            <div class="nav-item" onclick="showPedidos('all')">
+                <div class="nav-icon">📊</div>
+                <span>Todos los Pedidos</span>
+            </div>
+            <div class="nav-item" onclick="showPedidos('confirmed')">
+                <div class="nav-icon">✅</div>
+                <span>Pedidos Confirmados</span>
+            </div>
+        </nav>
+        
+        <!-- Bottom Actions -->
+        <div class="sidebar-bottom">
+            <div class="bottom-actions">
+                <button class="btn btn-secondary btn-sidebar" onclick="toggleTheme()" id="themeToggle">
+                    🌙 Modo Oscuro
+                </button>
+                <button class="btn btn-secondary btn-sidebar" onclick="triggerCsvUpload()">
+                    📤 Cargar Clientes
+                </button>
+                <button class="btn btn-secondary btn-sidebar" onclick="triggerProductosCsvUpload()">
+                    📦 Cargar Productos
+                </button>
+                <input type="file" id="csvFileInput" class="file-input" accept=".csv" onchange="handleCsvUpload(event)">
+                <input type="file" id="csvProductosFileInput" class="file-input" accept=".csv" onchange="handleProductosCsvUpload(event)">
+                <div class="upload-status-container">
+                    <span id="uploadStatus" class="upload-status"></span>
+                    <span id="uploadProductosStatus" class="upload-status"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Top Bar -->
+        <div class="top-bar">
+            <h1 class="page-title" id="pageTitle">⏳ Pedidos Pendientes</h1>
+            <div class="top-actions">
+                <button class="btn btn-primary" onclick="cargarDatos()">
+                    🔄 Actualizar
+                </button>
+                <button class="btn btn-secondary" onclick="printDashboard()">
+                    🖨️ Imprimir
+                </button>
+            </div>
+        </div>
+
+        <!-- Content Area -->
+        <div class="content-area">
+            <!-- Stats Grid -->
+            <div class="stats-grid" id="statsGrid">
+                <!-- Stats se cargan dinámicamente -->
+            </div>
+
+            <!-- Pedidos Container -->
+            <div class="pedidos-container">
+                <div class="pedidos-header">
+                    <h2 class="pedidos-title" id="pedidosTitle">⏳ Pedidos Pendientes</h2>
+                </div>
+                <div class="pedidos-content" id="contenidoTabla">
+                    <div class="loading">Presiona "Actualizar" para cargar los pedidos</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Variable global para almacenar todos los pedidos
+        let allPedidos = [];
+        let currentFilter = 'pending'; // Cambiar default a 'pending'
+        
+        // Función para alternar entre modo claro y oscuro
+        function toggleTheme() {
+            const body = document.body;
+            const themeToggle = document.getElementById('themeToggle');
+            
+            if (body.classList.contains('light-mode')) {
+                // Cambiar a modo oscuro
+                body.classList.remove('light-mode');
+                themeToggle.innerHTML = '🌙 Modo Oscuro';
+                localStorage.setItem('theme', 'dark');
+                console.log('🌙 Cambiado a modo oscuro');
+            } else {
+                // Cambiar a modo claro
+                body.classList.add('light-mode');
+                themeToggle.innerHTML = '☀️ Modo Claro';
+                localStorage.setItem('theme', 'light');
+                console.log('☀️ Cambiado a modo claro');
+            }
+        }
+        
+        // Función para cargar el tema guardado
+        function loadSavedTheme() {
+            const savedTheme = localStorage.getItem('theme');
+            const body = document.body;
+            const themeToggle = document.getElementById('themeToggle');
+            
+            if (savedTheme === 'light') {
+                body.classList.add('light-mode');
+                if (themeToggle) {
+                    themeToggle.innerHTML = '☀️ Modo Claro';
+                }
+                console.log('☀️ Tema claro cargado desde localStorage');
+            } else {
+                body.classList.remove('light-mode');
+                if (themeToggle) {
+                    themeToggle.innerHTML = '🌙 Modo Oscuro';
+                }
+                console.log('🌙 Tema oscuro cargado (por defecto)');
+            }
+        }
+
+        async function cargarDatos() {
+            console.log('🔄 Iniciando carga de pedidos completos...');
+            
+            // Mostrar loading
+            document.getElementById('contenidoTabla').innerHTML = `
+                <div class="loading">🔄 Cargando pedidos...</div>
+            `;
+            
+            try {
+                const respuesta = await fetch('/api/pedidos-completos');
+                console.log('📡 Respuesta del servidor:', respuesta.status);
+                
+                if (!respuesta.ok) {
+                    throw new Error(`Error HTTP: ${respuesta.status}`);
+                }
+                
+                const datos = await respuesta.json();
+                console.log('📊 Datos recibidos:', datos);
+                
+                // Asegurar que pedidos sea siempre un array
+                const pedidos = Array.isArray(datos.pedidos) ? datos.pedidos : [];
+                
+                if (datos.success) {
+                    // Almacenar todos los pedidos globalmente
+                    allPedidos = pedidos;
+                    // Mostrar estadísticas
+                    mostrarEstadisticas(pedidos);
+                    // Mostrar según el filtro actual
+                    showPedidos(currentFilter);
+                } else {
+                    throw new Error(datos.error || 'No se encontraron datos válidos');
+                }
+                
+            } catch (error) {
+                console.error('❌ Error:', error);
+                mostrarError(error.message);
+            }
+        }
+
+        function mostrarEstadisticas(pedidos) {
+            const pendientes = pedidos.filter(p => (p.estado || 'PENDIENTE').toUpperCase() === 'PENDIENTE').length;
+            const confirmados = pedidos.filter(p => (p.estado || '').toUpperCase() === 'CONFIRMADO').length;
+            const total = pedidos.length;
+            const totalRevenue = pedidos
+                .filter(p => (p.estado || '').toUpperCase() === 'CONFIRMADO')
+                .reduce((sum, p) => sum + (parseFloat(p.total) || 0), 0);
+
+            const statsHtml = `
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div>
+                            <div class="stat-value">${pendientes}</div>
+                            <div class="stat-label">Pedidos Pendientes</div>
+                        </div>
+                        <div class="stat-icon pending">⏳</div>
+                    </div>
+                    <div class="stat-change">Requieren atención</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div>
+                            <div class="stat-value">${confirmados}</div>
+                            <div class="stat-label">Pedidos Confirmados</div>
+                        </div>
+                        <div class="stat-icon confirmed">✅</div>
+                    </div>
+                    <div class="stat-change">Procesados</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div>
+                            <div class="stat-value">${total}</div>
+                            <div class="stat-label">Total de Pedidos</div>
+                        </div>
+                        <div class="stat-icon total">📊</div>
+                    </div>
+                    <div class="stat-change">En el sistema</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div>
+                            <div class="stat-value">$${formatearPrecio(totalRevenue)}</div>
+                            <div class="stat-label">Ingresos Confirmados</div>
+                        </div>
+                        <div class="stat-icon revenue">💰</div>
+                    </div>
+                    <div class="stat-change">Facturación</div>
+                </div>
+            `;
+
+            document.getElementById('statsGrid').innerHTML = statsHtml;
+        }
+
+        function showPedidos(filterType) {
+            console.log(`🔍 Mostrando pedidos: ${filterType}`);
+            
+            currentFilter = filterType;
+            
+            // Actualizar navegación activa
+            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+            
+            // Filtrar pedidos según el tipo
+            let pedidosFiltrados = [];
+            let headerText = '';
+            let pageTitle = '';
+            
+            if (filterType === 'pending') {
+                pedidosFiltrados = allPedidos.filter(pedido => 
+                    (pedido.estado || 'PENDIENTE').toUpperCase() === 'PENDIENTE'
+                );
+                headerText = '⏳ Pedidos Pendientes';
+                pageTitle = '⏳ Pedidos Pendientes';
+                document.querySelector('.nav-item').classList.add('active');
+            } else if (filterType === 'all') {
+                pedidosFiltrados = allPedidos;
+                headerText = '📊 Todos los Pedidos';
+                pageTitle = '📊 Todos los Pedidos';
+                document.querySelectorAll('.nav-item')[1].classList.add('active');
+            } else if (filterType === 'confirmed') {
+                pedidosFiltrados = allPedidos.filter(pedido => 
+                    (pedido.estado || '').toUpperCase() === 'CONFIRMADO'
+                );
+                headerText = '✅ Pedidos Confirmados';
+                pageTitle = '✅ Pedidos Confirmados';
+                document.querySelectorAll('.nav-item')[2].classList.add('active');
+            }
+            
+            // Ordenar pedidos por fecha (más recientes primero)
+            pedidosFiltrados.sort((a, b) => {
+                const fechaA = new Date(a.fecha_hora || 0);
+                const fechaB = new Date(b.fecha_hora || 0);
+                return fechaB - fechaA;
+            });
+            
+            // Actualizar títulos
+            document.getElementById('pageTitle').textContent = pageTitle;
+            document.getElementById('pedidosTitle').textContent = headerText;
+            
+            // Mostrar pedidos filtrados
+            mostrarPedidos(pedidosFiltrados);
+            
+            console.log(`✅ Mostrando ${pedidosFiltrados.length} pedidos de ${allPedidos.length} totales`);
+        }
+
+        async function actualizarEstadoPedido(pedidoId, nuevoEstado) {
+            const selector = document.getElementById(`estado-${pedidoId}`);
+            const loading = document.getElementById(`loading-${pedidoId}`);
+            const estadoActual = selector.dataset.estadoActual;
+            
+            // Si no cambió el estado, no hacer nada
+            if (nuevoEstado === estadoActual) {
+                return;
+            }
+            
+            console.log(`🔄 Actualizando pedido ${pedidoId} de ${estadoActual} a ${nuevoEstado}`);
+            
+            // Mostrar loading
+            loading.style.display = 'inline';
+            selector.disabled = true;
+            
+            try {
+                const response = await fetch(`/api/pedidos/${pedidoId}/estado`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ estado: nuevoEstado })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    console.log(`✅ Estado actualizado: ${result.message}`);
+                    
+                    // Actualizar el dataset para futuras comparaciones
+                    selector.dataset.estadoActual = nuevoEstado;
+                    
+                    // Mostrar mensaje de éxito temporal
+                    loading.textContent = '✅ Actualizado';
+                    loading.style.color = '#43e97b';
+                    
+                    // Recargar datos después de 1 segundo para reflejar cambios
+                    setTimeout(() => {
+                        cargarDatos();
+                    }, 1000);
+                    
+                } else {
+                    throw new Error(result.error || 'Error desconocido');
+                }
+                
+            } catch (error) {
+                console.error('❌ Error actualizando estado:', error);
+                
+                // Revertir selector al estado anterior
+                selector.value = estadoActual;
+                
+                // Mostrar error
+                loading.textContent = '❌ Error';
+                loading.style.color = '#f5576c';
+                
+                alert(`Error al actualizar el estado: ${error.message}`);
+                
+            } finally {
+                // Ocultar loading después de 3 segundos
+                setTimeout(() => {
+                    loading.style.display = 'none';
+                    loading.textContent = 'Actualizando...';
+                    loading.style.color = '#8892b0';
+                    selector.disabled = false;
+                }, 3000);
+            }
+        }
+
+        function mostrarPedidos(pedidos) {
+            console.log('📋 Mostrando', pedidos.length, 'pedidos');
+            
+            if (!pedidos || pedidos.length === 0) {
+                document.getElementById('contenidoTabla').innerHTML = `
+                    <div class="loading">📭 No hay pedidos disponibles</div>
+                `;
+                return;
+            }
+
+            let html = '';
+            
+            pedidos.forEach(pedido => {
+                const estadoClass = `estado-${(pedido.estado || 'pendiente').toLowerCase()}`;
+                const fechaFormateada = formatearFecha(pedido.fecha_hora);
+                
+                // Usar total calculado si existe, sino el total del pedido
+                const totalMostrar = pedido.total_calculado || pedido.total || 0;
+                const totalFormateado = formatearPrecio(totalMostrar);
+                
+                // Verificar si hay discrepancia entre totales
+                const hayDiscrepancia = pedido.total && pedido.total_calculado && 
+                    Math.abs(parseFloat(pedido.total) - parseFloat(pedido.total_calculado)) > 0.01;
+                
+                html += `
+                    <details class="pedido-card">
+                        <summary class="pedido-header">
+                            <div class="pedido-info">
+                                <div class="pedido-field">
+                                    <span class="pedido-label">Pedido ID</span>
+                                    <span class="pedido-value pedido-id">${pedido.pedido_id || '-'}</span>
+                                </div>
+                                <div class="pedido-field">
+                                    <span class="pedido-label">Cliente</span>
+                                    <span class="pedido-value">${pedido.cliente_nombre || '-'}</span>
+                                </div>
+                                <div class="pedido-field">
+                                    <span class="pedido-label">Fecha</span>
+                                    <span class="pedido-value">${fechaFormateada}</span>
+                                </div>
+                                <div class="pedido-field">
+                                    <span class="pedido-label">Items</span>
+                                    <span class="pedido-value cantidad">${pedido.items_cantidad || pedido.detalles?.length || 0}</span>
+                                </div>
+                                <div class="pedido-field">
+                                    <span class="pedido-label">Total</span>
+                                    <span class="pedido-value precio total-destacado">$${totalFormateado}</span>
+                                    ${hayDiscrepancia ? '<br><small style="color: #f5576c;">⚠️ Total recalculado</small>' : ''}
+                                </div>
+                                <div class="pedido-field">
+                                    <span class="pedido-label">Estado</span>
+                                    <span class="estado-badge ${estadoClass}">${pedido.estado || 'PENDIENTE'}</span>
+                                </div>
+                            </div>
+                            <span class="expand-icon">▼</span>
+                        </summary>
+                        
+                        <div class="detalles-container">
+                            ${pedido.observaciones ? `<div class="observacion">📝 ${pedido.observaciones}</div>` : ''}
+                            
+                            <div class="acciones-pedido">
+                                <label for="estado-${pedido.pedido_id}"><strong>Cambiar estado:</strong></label>
+                                <select id="estado-${pedido.pedido_id}" class="estado-selector" 
+                                        onchange="actualizarEstadoPedido('${pedido.pedido_id}', this.value)"
+                                        data-estado-actual="${pedido.estado || 'PENDIENTE'}">
+                                    <option value="PENDIENTE" ${(pedido.estado || 'PENDIENTE') === 'PENDIENTE' ? 'selected' : ''}>⏳ PENDIENTE</option>
+                                    <option value="CONFIRMADO" ${pedido.estado === 'CONFIRMADO' ? 'selected' : ''}>✅ CONFIRMADO</option>
+                                    <option value="CANCELADO" ${pedido.estado === 'CANCELADO' ? 'selected' : ''}>❌ CANCELADO</option>
+                                </select>
+                                <span id="loading-${pedido.pedido_id}" class="loading-estado" style="display: none;">Actualizando...</span>
+                            </div>
+                            
+                            ${pedido.detalles && pedido.detalles.length > 0 ? `
+                                <table class="detalles-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Producto</th>
+                                            <th>Cantidad</th>
+                                            <th>Precio Unit.</th>
+                                            <th>Importe</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${pedido.detalles.map(detalle => `
+                                            <tr>
+                                                <td>${detalle.producto_nombre || '-'}</td>
+                                                <td class="cantidad">${detalle.cantidad || 0}</td>
+                                                <td class="precio">$${formatearPrecio(detalle.precio_unitario || 0)}</td>
+                                                <td class="precio">$${formatearPrecio(detalle.importe || 0)}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            ` : '<p style="padding: 20px; text-align: center; color: #8892b0;">No hay detalles disponibles</p>'}
+                        </div>
+                    </details>
+                `;
+            });
+
+            document.getElementById('contenidoTabla').innerHTML = html;
+            console.log('✅ Pedidos mostrados exitosamente');
+        }
+
+        function mostrarError(mensaje) {
+            document.getElementById('contenidoTabla').innerHTML = `
+                <div class="error">
+                    <h3>❌ Error</h3>
+                    <p>${mensaje}</p>
+                    <button class="btn btn-primary" onclick="cargarDatos()">🔄 Reintentar</button>
+                </div>
+            `;
+        }
+
+        function formatearPrecio(precio) {
+            return new Intl.NumberFormat('es-AR').format(precio);
+        }
+
+        function formatearFecha(fechaHora) {
+            if (!fechaHora) return '-';
+            
+            try {
+                let fecha;
+                
+                if (fechaHora.includes('T') || fechaHora.includes('Z')) {
+                    fecha = new Date(fechaHora);
+                } else if (fechaHora.includes('/')) {
+                    const parts = fechaHora.split(' ');
+                    const datePart = parts[0];
+                    const timePart = parts[1] || '00:00:00';
+                    
+                    const [day, month, year] = datePart.split('/');
+                    const isoString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${timePart}`;
+                    fecha = new Date(isoString);
+                } else {
+                    fecha = new Date(fechaHora);
+                }
+                
+                if (isNaN(fecha.getTime())) {
+                    console.warn('Fecha inválida:', fechaHora);
+                    return fechaHora;
+                }
+                
+                return fecha.toLocaleString('es-AR', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            } catch (error) {
+                console.warn('Error formateando fecha:', fechaHora, error);
+                return fechaHora;
+            }
+        }
+
+        function printDashboard() {
+            console.log('🖨️ Iniciando impresión del dashboard...');
+            
+            const allDetails = document.querySelectorAll('.pedido-card');
+            allDetails.forEach(detail => {
+                detail.setAttribute('open', 'true');
+                const summary = detail.querySelector('summary');
+                const detallesContainer = detail.querySelector('.detalles-container');
+                if (summary) summary.style.display = 'block';
+                if (detallesContainer) detallesContainer.style.display = 'block';
+            });
+            
+            const allTables = document.querySelectorAll('.detalles-table');
+            allTables.forEach(table => {
+                table.style.display = 'table';
+                table.style.visibility = 'visible';
+                
+                const thead = table.querySelector('thead');
+                const tbody = table.querySelector('tbody');
+                if (thead) {
+                    thead.style.display = 'table-header-group';
+                    thead.style.visibility = 'visible';
+                }
+                if (tbody) {
+                    tbody.style.display = 'table-row-group';
+                    tbody.style.visibility = 'visible';
+                }
+                
+                const rows = table.querySelectorAll('tr');
+                rows.forEach(row => {
+                    row.style.display = 'table-row';
+                    row.style.visibility = 'visible';
+                    
+                    const cells = row.querySelectorAll('th, td');
+                    cells.forEach(cell => {
+                        cell.style.display = 'table-cell';
+                        cell.style.visibility = 'visible';
+                    });
+                });
+            });
+            
+            setTimeout(() => {
+                console.log('🖨️ Ejecutando window.print()...');
+                window.print();
+            }, 200);
+        }
+
+        function triggerCsvUpload() {
+            document.getElementById('csvFileInput').click();
+        }
+
+        async function handleCsvUpload(event) {
+            const file = event.target.files[0];
+            const statusElement = document.getElementById('uploadStatus');
+            
+            if (!file) {
+                return;
+            }
+            
+            if (!file.name.toLowerCase().endsWith('.csv')) {
+                statusElement.textContent = '❌ Por favor selecciona un archivo CSV';
+                statusElement.style.color = '#f5576c';
+                return;
+            }
+            
+            console.log('📤 Iniciando carga de CSV:', file.name);
+            statusElement.textContent = '⏳ Cargando base de clientes...';
+            statusElement.style.color = '#8892b0';
+            
+            try {
+                const csvContent = await readFileAsText(file);
+                console.log('📄 Contenido CSV leído, enviando al servidor...');
+                
+                const response = await fetch('/api/upload-clientes-csv', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        csvContent: csvContent,
+                        fileName: file.name
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    console.log('✅ Base de clientes actualizada exitosamente');
+                    statusElement.textContent = `✅ Base actualizada: ${result.recordsProcessed} registros`;
+                    statusElement.style.color = '#43e97b';
+                    
+                    event.target.value = '';
+                    
+                    setTimeout(() => {
+                        statusElement.textContent = '';
+                    }, 5000);
+                } else {
+                    throw new Error(result.error || 'Error desconocido');
+                }
+                
+            } catch (error) {
+                console.error('❌ Error cargando CSV:', error);
+                statusElement.textContent = `❌ Error: ${error.message}`;
+                statusElement.style.color = '#f5576c';
+                
+                event.target.value = '';
+                
+                setTimeout(() => {
+                    statusElement.textContent = '';
+                }, 8000);
+            }
+        }
+
+        function readFileAsText(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = (e) => reject(new Error('Error leyendo el archivo'));
+                reader.readAsText(file, 'UTF-8');
+            });
+        }
+
+        function triggerProductosCsvUpload() {
+            document.getElementById('csvProductosFileInput').click();
+        }
+
+        async function handleProductosCsvUpload(event) {
+            const file = event.target.files[0];
+            const statusElement = document.getElementById('uploadProductosStatus');
+            
+            if (!file) {
+                return;
+            }
+            
+            if (!file.name.toLowerCase().endsWith('.csv')) {
+                statusElement.textContent = '❌ Por favor selecciona un archivo CSV';
+                statusElement.style.color = '#f5576c';
+                return;
+            }
+            
+            console.log('📦 Iniciando carga de CSV de productos:', file.name);
+            statusElement.textContent = '⏳ Cargando base de productos...';
+            statusElement.style.color = '#8892b0';
+            
+            try {
+                const csvContent = await readFileAsText(file);
+                console.log('📄 Contenido CSV de productos leído, enviando al servidor...');
+                
+                const response = await fetch('/api/upload-productos-csv', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        csvContent: csvContent,
+                        fileName: file.name
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    console.log('✅ Base de productos actualizada exitosamente');
+                    statusElement.textContent = `✅ Base productos actualizada: ${result.recordsProcessed} registros`;
+                    statusElement.style.color = '#43e97b';
+                    
+                    event.target.value = '';
+                    
+                    setTimeout(() => {
+                        statusElement.textContent = '';
+                    }, 5000);
+                } else {
+                    throw new Error(result.error || 'Error desconocido');
+                }
+                
+            } catch (error) {
+                console.error('❌ Error cargando CSV de productos:', error);
+                statusElement.textContent = `❌ Error: ${error.message}`;
+                statusElement.style.color = '#f5576c';
+                
+                event.target.value = '';
+                
+                setTimeout(() => {
+                    statusElement.textContent = '';
+                }, 8000);
+            }
+        }
+
+        // Cargar datos automáticamente al iniciar
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSavedTheme();
+            cargarDatos();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+producto_id,categoria_id,producto_nombre,precio,activo
+1,1,Oreo Original 117g,450,SI
+2,1,Pepitos Chocolate 100g,380,SI
+3,1,Tita Vainilla 168g,320,SI
+4,1,Chocolinas 170g,290,SI
+5,1,Criollitas Dulces 200g,350,SI
+6,1,Sonrisas Frutilla 150g,280,SI
+7,2,Coca Cola 500ml,350,SI
+8,2,Agua Mineral 500ml,180,SI
+9,2,Jugo Naranja 1L,420,SI
+10,2,Sprite 500ml,340,SI
+11,2,Fanta 500ml,340,SI
+12,2,Agua con Gas 500ml,200,SI
+13,3,Leche Entera 1L,280,SI
+14,3,Yogur Natural 125g,150,SI
+15,3,Queso Cremoso 200g,520,SI
+16,3,Manteca 200g,380,SI
+17,3,Dulce de Leche 400g,450,SI
+18,3,Crema de Leche 200ml,320,SI
+19,4,Pan Lactal 500g,320,SI
+20,4,Medialunas x6,450,SI
+21,4,Pan Hamburguesa x4,380,SI
+22,4,Tostadas x20,280,SI
+23,4,Facturas Surtidas x6,520,SI
+24,5,Atún en Aceite 170g,420,SI
+25,5,Tomate Triturado 400g,280,SI
+26,5,Arvejas en Lata 300g,250,SI
+27,5,Choclo en Lata 300g,270,SI
+28,5,Mermelada Durazno 450g,380,SI
+29,6,Papas Fritas 150g,320,SI
+30,6,Palitos Salados 100g,180,SI
+31,6,Maní Salado 200g,250,SI
+32,6,Chizitos 75g,220,SI
+33,7,Alfajor Havanna,180,SI
+34,7,Chocolate Milka 100g,450,SI
+35,7,Caramelos Sugus x10,120,SI
+36,7,Chicles Beldent x5,80,SI
+37,8,Detergente 500ml,320,SI
+38,8,Lavandina 1L,180,SI
+39,8,Esponja Cocina x3,150,SI
+40,8,Papel Higiénico x4,280,SI
+41,9,Shampoo 400ml,450,SI
+42,9,Jabón Tocador x3,220,SI
+43,9,Pasta Dental 90g,180,SI
+44,10,Hamburguesas x4,520,SI
+45,10,Papas Congeladas 1kg,380,SI
+46,10,Helado 1L,650,SI
