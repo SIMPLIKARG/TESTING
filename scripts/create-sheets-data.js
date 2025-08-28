@@ -11,6 +11,78 @@ require('dotenv').config();
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID;
 
+// Definir qué columnas deben ser numéricas para cada hoja
+const columnasNumericas = {
+  Clientes: ['cliente_id', 'lista'],
+  Categorias: ['categoria_id'],
+  Productos: ['producto_id', 'categoria_id', 'precio1', 'precio2', 'precio3', 'precio4', 'precio5', 'proveedor_id'],
+  Pedidos: ['cliente_id', 'items_cantidad', 'total'],
+  DetallePedidos: ['producto_id', 'categoria_id', 'cantidad', 'precio_unitario', 'importe'],
+  Metricas: ['producto_id', 'categoria_id', 'proveedor_id', 'cantidad_vendida', 'ingresos_totales', 'costo_total_estimado', 'ganancia_total_estimada', 'rentabilidad_porcentual']
+};
+
+// Función para normalizar números (convertir comas a puntos y limpiar formato)
+function normalizarNumero(valor) {
+  if (valor === '' || valor === null || valor === undefined || valor === 'null' || valor === 'undefined') {
+    return 0;
+  }
+  
+  // Convertir a string para procesamiento
+  let valorStr = String(valor).trim();
+  
+  // Si ya es un número válido, devolverlo
+  if (!isNaN(valorStr) && !isNaN(parseFloat(valorStr))) {
+    return parseFloat(valorStr);
+  }
+  
+  // Limpiar el formato de números:
+  // - Remover espacios
+  // - Reemplazar comas por puntos (formato decimal argentino -> estadounidense)
+  // - Remover caracteres no numéricos excepto puntos y signos negativos
+  valorStr = valorStr
+    .replace(/\s/g, '') // Remover espacios
+    .replace(/,/g, '.') // Reemplazar comas por puntos
+    .replace(/[^\d.-]/g, ''); // Mantener solo dígitos, puntos y signos negativos
+  
+  // Convertir a número
+  const numero = parseFloat(valorStr);
+  
+  // Si no es un número válido, devolver 0
+  return isNaN(numero) ? 0 : numero;
+}
+
+// Función para procesar datos antes de enviar a Google Sheets
+function procesarDatosParaSheets(nombreHoja, datos) {
+  if (!datos || datos.length === 0) return datos;
+  
+  const columnasNum = columnasNumericas[nombreHoja] || [];
+  
+  return datos.map((fila, filaIndex) => {
+    if (filaIndex === 0) {
+      // Es la fila de encabezados, no procesarla
+      return fila;
+    }
+    
+    return fila.map((celda, columnaIndex) => {
+      // Obtener el nombre de la columna desde la primera fila (encabezados)
+      const nombreColumna = datos[0][columnaIndex];
+      
+      // Si esta columna debe ser numérica
+      if (columnasNum.includes(nombreColumna)) {
+        return normalizarNumero(celda);
+      }
+      
+      // Para columnas no numéricas, mantener el valor original
+      // pero convertir null/undefined a string vacío
+      if (celda === null || celda === undefined) {
+        return '';
+      }
+      
+      return celda;
+    });
+  });
+}
+
 const auth = new GoogleAuth({
   credentials: {
     client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
@@ -57,72 +129,72 @@ const datosCompletos = {
   ],
   
   Productos: [
-    ['producto_id', 'categoria_id', 'producto_nombre', 'precio1', 'precio2', 'precio3', 'precio4', 'precio5', 'activo'],
+    ['producto_id', 'categoria_id', 'producto_nombre', 'precio1', 'precio2', 'precio3', 'precio4', 'precio5', 'activo', 'proveedor_id', 'proveedor_nombre'],
     // Galletitas
-    [1, 1, 'Oreo Original 117g', 450, 420, 400, 380, 360, 'SI'],
-    [2, 1, 'Pepitos Chocolate 100g', 380, 360, 340, 320, 300, 'SI'],
-    [3, 1, 'Tita Vainilla 168g', 320, 300, 280, 260, 240, 'SI'],
-    [4, 1, 'Chocolinas 170g', 290, 270, 250, 230, 210, 'SI'],
-    [5, 1, 'Criollitas Dulces 200g', 350, 330, 310, 290, 270, 'SI'],
-    [6, 1, 'Sonrisas Frutilla 150g', 280, 260, 240, 220, 200, 'SI'],
+    [1, 1, 'Oreo Original 117g', 450, 420, 400, 380, 360, 'SI', 'PROV001', 'Mondelez Argentina'],
+    [2, 1, 'Pepitos Chocolate 100g', 380, 360, 340, 320, 300, 'SI', 'PROV002', 'Arcor S.A.'],
+    [3, 1, 'Tita Vainilla 168g', 320, 300, 280, 260, 240, 'SI', 'PROV002', 'Arcor S.A.'],
+    [4, 1, 'Chocolinas 170g', 290, 270, 250, 230, 210, 'SI', 'PROV002', 'Arcor S.A.'],
+    [5, 1, 'Criollitas Dulces 200g', 350, 330, 310, 290, 270, 'SI', 'PROV002', 'Arcor S.A.'],
+    [6, 1, 'Sonrisas Frutilla 150g', 280, 260, 240, 220, 200, 'SI', 'PROV002', 'Arcor S.A.'],
     
     // Bebidas
-    [7, 2, 'Coca Cola 500ml', 350, 330, 310, 290, 270, 'SI'],
-    [8, 2, 'Agua Mineral 500ml', 180, 170, 160, 150, 140, 'SI'],
-    [9, 2, 'Jugo Naranja 1L', 420, 400, 380, 360, 340, 'SI'],
-    [10, 2, 'Sprite 500ml', 340, 320, 300, 280, 260, 'SI'],
-    [11, 2, 'Fanta 500ml', 340, 320, 300, 280, 260, 'SI'],
-    [12, 2, 'Agua con Gas 500ml', 200, 190, 180, 170, 160, 'SI'],
+    [7, 2, 'Coca Cola 500ml', 350, 330, 310, 290, 270, 'SI', 'PROV003', 'Coca-Cola FEMSA'],
+    [8, 2, 'Agua Mineral 500ml', 180, 170, 160, 150, 140, 'SI', 'PROV006', 'Danone Waters'],
+    [9, 2, 'Jugo Naranja 1L', 420, 400, 380, 360, 340, 'SI', 'PROV007', 'Cepita S.A.'],
+    [10, 2, 'Sprite 500ml', 340, 320, 300, 280, 260, 'SI', 'PROV003', 'Coca-Cola FEMSA'],
+    [11, 2, 'Fanta 500ml', 340, 320, 300, 280, 260, 'SI', 'PROV003', 'Coca-Cola FEMSA'],
+    [12, 2, 'Agua con Gas 500ml', 200, 190, 180, 170, 160, 'SI', 'PROV006', 'Danone Waters'],
     
     // Lácteos
-    [13, 3, 'Leche Entera 1L', 280, 260, 240, 220, 200, 'SI'],
-    [14, 3, 'Yogur Natural 125g', 150, 140, 130, 120, 110, 'SI'],
-    [15, 3, 'Queso Cremoso 200g', 520, 490, 460, 430, 400, 'SI'],
-    [16, 3, 'Manteca 200g', 380, 360, 340, 320, 300, 'SI'],
-    [17, 3, 'Dulce de Leche 400g', 450, 420, 390, 360, 330, 'SI'],
-    [18, 3, 'Crema de Leche 200ml', 320, 300, 280, 260, 240, 'SI'],
+    [13, 3, 'Leche Entera 1L', 280, 260, 240, 220, 200, 'SI', 'PROV004', 'La Serenísima'],
+    [14, 3, 'Yogur Natural 125g', 150, 140, 130, 120, 110, 'SI', 'PROV004', 'La Serenísima'],
+    [15, 3, 'Queso Cremoso 200g', 520, 490, 460, 430, 400, 'SI', 'PROV008', 'Milkaut S.A.'],
+    [16, 3, 'Manteca 200g', 380, 360, 340, 320, 300, 'SI', 'PROV004', 'La Serenísima'],
+    [17, 3, 'Dulce de Leche 400g', 450, 420, 390, 360, 330, 'SI', 'PROV004', 'La Serenísima'],
+    [18, 3, 'Crema de Leche 200ml', 320, 300, 280, 260, 240, 'SI', 'PROV004', 'La Serenísima'],
     
     // Panadería
-    [19, 4, 'Pan Lactal 500g', 320, 300, 280, 260, 240, 'SI'],
-    [20, 4, 'Medialunas x6', 450, 420, 390, 360, 330, 'SI'],
-    [21, 4, 'Pan Hamburguesa x4', 380, 360, 340, 320, 300, 'SI'],
-    [22, 4, 'Tostadas x20', 280, 260, 240, 220, 200, 'SI'],
-    [23, 4, 'Facturas Surtidas x6', 520, 490, 460, 430, 400, 'SI'],
+    [19, 4, 'Pan Lactal 500g', 320, 300, 280, 260, 240, 'SI', 'PROV005', 'Bimbo Argentina'],
+    [20, 4, 'Medialunas x6', 450, 420, 390, 360, 330, 'SI', 'PROV009', 'Panadería Local'],
+    [21, 4, 'Pan Hamburguesa x4', 380, 360, 340, 320, 300, 'SI', 'PROV005', 'Bimbo Argentina'],
+    [22, 4, 'Tostadas x20', 280, 260, 240, 220, 200, 'SI', 'PROV010', 'Tostadas del Norte'],
+    [23, 4, 'Facturas Surtidas x6', 520, 490, 460, 430, 400, 'SI', 'PROV009', 'Panadería Local'],
     
     // Conservas
-    [24, 5, 'Atún en Aceite 170g', 420, 400, 380, 360, 340, 'SI'],
-    [25, 5, 'Tomate Triturado 400g', 280, 260, 240, 220, 200, 'SI'],
-    [26, 5, 'Arvejas en Lata 300g', 250, 230, 210, 190, 170, 'SI'],
-    [27, 5, 'Choclo en Lata 300g', 270, 250, 230, 210, 190, 'SI'],
-    [28, 5, 'Mermelada Durazno 450g', 380, 360, 340, 320, 300, 'SI'],
+    [24, 5, 'Atún en Aceite 170g', 420, 400, 380, 360, 340, 'SI', 'PROV011', 'La Campagnola'],
+    [25, 5, 'Tomate Triturado 400g', 280, 260, 240, 220, 200, 'SI', 'PROV011', 'La Campagnola'],
+    [26, 5, 'Arvejas en Lata 300g', 250, 230, 210, 190, 170, 'SI', 'PROV011', 'La Campagnola'],
+    [27, 5, 'Choclo en Lata 300g', 270, 250, 230, 210, 190, 'SI', 'PROV011', 'La Campagnola'],
+    [28, 5, 'Mermelada Durazno 450g', 380, 360, 340, 320, 300, 'SI', 'PROV012', 'BC La Riojana'],
     
     // Snacks
-    [29, 6, 'Papas Fritas 150g', 320, 300, 280, 260, 240, 'SI'],
-    [30, 6, 'Palitos Salados 100g', 180, 170, 160, 150, 140, 'SI'],
-    [31, 6, 'Maní Salado 200g', 250, 230, 210, 190, 170, 'SI'],
-    [32, 6, 'Chizitos 75g', 220, 200, 180, 160, 140, 'SI'],
+    [29, 6, 'Papas Fritas 150g', 320, 300, 280, 260, 240, 'SI', 'PROV013', 'PepsiCo Foods'],
+    [30, 6, 'Palitos Salados 100g', 180, 170, 160, 150, 140, 'SI', 'PROV002', 'Arcor S.A.'],
+    [31, 6, 'Maní Salado 200g', 250, 230, 210, 190, 170, 'SI', 'PROV014', 'Lorenz Snack'],
+    [32, 6, 'Chizitos 75g', 220, 200, 180, 160, 140, 'SI', 'PROV013', 'PepsiCo Foods'],
     
     // Dulces
-    [33, 7, 'Alfajor Havanna', 180, 170, 160, 150, 140, 'SI'],
-    [34, 7, 'Chocolate Milka 100g', 450, 420, 390, 360, 330, 'SI'],
-    [35, 7, 'Caramelos Sugus x10', 120, 110, 100, 90, 80, 'SI'],
-    [36, 7, 'Chicles Beldent x5', 80, 75, 70, 65, 60, 'SI'],
+    [33, 7, 'Alfajor Havanna', 180, 170, 160, 150, 140, 'SI', 'PROV015', 'Havanna S.A.'],
+    [34, 7, 'Chocolate Milka 100g', 450, 420, 390, 360, 330, 'SI', 'PROV001', 'Mondelez Argentina'],
+    [35, 7, 'Caramelos Sugus x10', 120, 110, 100, 90, 80, 'SI', 'PROV002', 'Arcor S.A.'],
+    [36, 7, 'Chicles Beldent x5', 80, 75, 70, 65, 60, 'SI', 'PROV001', 'Mondelez Argentina'],
     
     // Limpieza
-    [37, 8, 'Detergente 500ml', 320, 300, 280, 260, 240, 'SI'],
-    [38, 8, 'Lavandina 1L', 180, 170, 160, 150, 140, 'SI'],
-    [39, 8, 'Esponja Cocina x3', 150, 140, 130, 120, 110, 'SI'],
-    [40, 8, 'Papel Higiénico x4', 280, 260, 240, 220, 200, 'SI'],
+    [37, 8, 'Detergente 500ml', 320, 300, 280, 260, 240, 'SI', 'PROV016', 'Unilever Argentina'],
+    [38, 8, 'Lavandina 1L', 180, 170, 160, 150, 140, 'SI', 'PROV017', 'Ayudín S.A.'],
+    [39, 8, 'Esponja Cocina x3', 150, 140, 130, 120, 110, 'SI', 'PROV018', '3M Argentina'],
+    [40, 8, 'Papel Higiénico x4', 280, 260, 240, 220, 200, 'SI', 'PROV019', 'Papelera del Plata'],
     
     // Higiene Personal
-    [41, 9, 'Shampoo 400ml', 450, 420, 390, 360, 330, 'SI'],
-    [42, 9, 'Jabón Tocador x3', 220, 200, 180, 160, 140, 'SI'],
-    [43, 9, 'Pasta Dental 90g', 180, 170, 160, 150, 140, 'SI'],
+    [41, 9, 'Shampoo 400ml', 450, 420, 390, 360, 330, 'SI', 'PROV016', 'Unilever Argentina'],
+    [42, 9, 'Jabón Tocador x3', 220, 200, 180, 160, 140, 'SI', 'PROV016', 'Unilever Argentina'],
+    [43, 9, 'Pasta Dental 90g', 180, 170, 160, 150, 140, 'SI', 'PROV020', 'Colgate-Palmolive'],
     
     // Congelados
-    [44, 10, 'Hamburguesas x4', 520, 490, 460, 430, 400, 'SI'],
-    [45, 10, 'Papas Congeladas 1kg', 380, 360, 340, 320, 300, 'SI'],
-    [46, 10, 'Helado 1L', 650, 620, 590, 560, 530, 'SI']
+    [44, 10, 'Hamburguesas x4', 520, 490, 460, 430, 400, 'SI', 'PROV021', 'Swift Argentina'],
+    [45, 10, 'Papas Congeladas 1kg', 380, 360, 340, 320, 300, 'SI', 'PROV022', 'McCain Foods'],
+    [46, 10, 'Helado 1L', 650, 620, 590, 560, 530, 'SI', 'PROV023', 'Freddo S.A.']
   ],
   
   Pedidos: [
@@ -165,6 +237,11 @@ const datosCompletos = {
     ['DET022', 'PED009', 45, 'Papas Congeladas 1kg', 10, 1, 380, 380, ''],
     ['DET023', 'PED009', 11, 'Fanta 500ml', 2, 1, 340, 340, ''],
     ['DET024', 'PED010', 19, 'Pan Lactal 500g', 4, 1, 320, 320, 'Sin sal si es posible']
+  ],
+  
+  Metricas: [
+    ['producto_id', 'producto_nombre', 'categoria_id', 'categoria_nombre', 'proveedor_id', 'proveedor_nombre', 'cantidad_vendida', 'ingresos_totales', 'costo_total_estimado', 'ganancia_total_estimada', 'rentabilidad_porcentual']
+    // Esta hoja se poblará automáticamente con el endpoint /api/actualizar-metricas
   ]
 };
 
@@ -226,13 +303,16 @@ async function crearYPoblarSheets() {
         range: `${nombreHoja}!A:Z`
       });
       
+      // Procesar datos para reemplazar celdas vacías con 0 en columnas numéricas
+      const datosProcessados = procesarDatosParaSheets(nombreHoja, datos);
+      
       // Insertar datos
       await sheets.spreadsheets.values.update({
         spreadsheetId: SPREADSHEET_ID,
         range: `${nombreHoja}!A1`,
-        valueInputOption: 'RAW',
+        valueInputOption: 'USER_ENTERED',
         requestBody: {
-          values: datos
+          values: datosProcessados
         }
       });
       

@@ -450,6 +450,220 @@
             color: #667eea;
         }
 
+        /* Estilos para Métricas */
+        .metricas-container {
+            display: none;
+        }
+
+        .metricas-container.active {
+            display: block;
+        }
+
+        .metricas-filters {
+            background: #1a1f2e;
+            border: 1px solid #2a3441;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .filter-label {
+            font-size: 12px;
+            color: #8892b0;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .filter-select {
+            padding: 10px 14px;
+            border: 1px solid #3a4553;
+            border-radius: 8px;
+            background: #252b3a;
+            color: #ffffff;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 150px;
+        }
+
+        .filter-select:hover {
+            border-color: #667eea;
+        }
+
+        .filter-select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .metricas-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 24px;
+        }
+
+        .metrica-card {
+            background: #1a1f2e;
+            border: 1px solid #2a3441;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+
+        .metrica-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #2a3441;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .metrica-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .metrica-content {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .producto-item {
+            padding: 16px 24px;
+            border-bottom: 1px solid #2a3441;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+
+        .producto-item:last-child {
+            border-bottom: none;
+        }
+
+        .producto-item:hover {
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .producto-info {
+            flex: 1;
+        }
+
+        .producto-nombre {
+            font-weight: 600;
+            color: #ffffff;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        .producto-categoria {
+            font-size: 12px;
+            color: #8892b0;
+        }
+
+        .producto-stats {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 4px;
+        }
+
+        .stat-primary {
+            font-weight: 700;
+            color: #43e97b;
+            font-size: 16px;
+        }
+
+        .stat-secondary {
+            font-size: 12px;
+            color: #8892b0;
+        }
+
+        .ranking-number {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+            margin-right: 12px;
+        }
+
+        .ranking-number.top-3 {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        /* Modo claro para métricas */
+        body.light-mode .metricas-filters {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+        }
+
+        body.light-mode .filter-select {
+            border: 1px solid #e2e8f0;
+            background: #f1f5f9;
+            color: #1e293b;
+        }
+
+        body.light-mode .filter-select:hover {
+            border-color: #667eea;
+        }
+
+        body.light-mode .filter-select:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        body.light-mode .metrica-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+        }
+
+        body.light-mode .metrica-header {
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        body.light-mode .metrica-title {
+            color: #1e293b;
+        }
+
+        body.light-mode .producto-item {
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        body.light-mode .producto-item:hover {
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        body.light-mode .producto-nombre {
+            color: #1e293b;
+        }
+
+        body.light-mode .producto-categoria {
+            color: #64748b;
+        }
+
+        body.light-mode .stat-secondary {
+            color: #64748b;
+        }
         .acciones-pedido {
             margin-top: 16px;
             padding-top: 16px;
@@ -789,6 +1003,182 @@
 
         .stat-card {
             animation: fadeIn 0.5s ease-out;
+            
+            /* Estilos para tablas de pedidos */
+            .table-container {
+                background: var(--card-bg);
+                border-radius: 12px;
+                overflow: hidden;
+                box-shadow: var(--shadow);
+            }
+            
+            .pedidos-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            
+            .pedidos-table th {
+                background: var(--primary-gradient);
+                color: white;
+                padding: 15px 12px;
+                text-align: left;
+                font-weight: 600;
+                font-size: 0.9rem;
+            }
+            
+            .pedidos-table td {
+                padding: 12px;
+                border-bottom: 1px solid var(--border-color);
+                vertical-align: middle;
+            }
+            
+            .pedidos-table tr:hover {
+                background: var(--hover-bg);
+            }
+            
+            .pedido-id {
+                font-weight: 600;
+                color: var(--accent-color);
+            }
+            
+            .precio {
+                text-align: right;
+                font-weight: 600;
+                color: var(--success-color);
+            }
+            
+            .text-center {
+                text-align: center;
+            }
+            
+            .estado-badge {
+                padding: 4px 12px;
+                border-radius: 20px;
+                font-size: 0.8rem;
+                font-weight: 600;
+                text-transform: uppercase;
+            }
+            
+            .estado-pendiente {
+                background: rgba(245, 87, 108, 0.2);
+                color: #f5576c;
+            }
+            
+            .estado-confirmado {
+                background: rgba(67, 233, 123, 0.2);
+                color: #43e97b;
+            }
+            
+            .btn-action {
+                background: var(--accent-color);
+                color: white;
+                border: none;
+                padding: 8px 12px;
+                border-radius: 6px;
+                cursor: pointer;
+                margin-right: 5px;
+                transition: all 0.3s ease;
+            }
+            
+            .btn-action:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+            }
+            
+            .btn-confirmar {
+                background: var(--success-color);
+            }
+            
+            .btn-confirmar:hover {
+                box-shadow: 0 4px 12px rgba(67, 233, 123, 0.3);
+            }
+            
+            /* Estados vacíos */
+            .empty-state {
+                text-align: center;
+                padding: 60px 20px;
+                color: var(--text-secondary);
+            }
+            
+            .empty-state i {
+                margin-bottom: 20px;
+                opacity: 0.5;
+            }
+            
+            .empty-state h3 {
+                margin-bottom: 10px;
+                color: var(--text-primary);
+            }
+            
+            .empty-state-small {
+                text-align: center;
+                padding: 20px;
+                color: var(--text-secondary);
+                font-style: italic;
+            }
+            
+            /* Tarjetas de categorías */
+            .categoria-card {
+                background: var(--card-bg);
+                border-radius: 12px;
+                padding: 20px;
+                margin-bottom: 15px;
+                box-shadow: var(--shadow);
+                border-left: 4px solid var(--accent-color);
+            }
+            
+            .categoria-card h4 {
+                margin: 0 0 15px 0;
+                color: var(--text-primary);
+                font-size: 1.1rem;
+            }
+            
+            .categoria-stats {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+                gap: 10px;
+            }
+            
+            .stat-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+            
+            .stat-label {
+                color: var(--text-secondary);
+                font-size: 0.9rem;
+            }
+            
+            .stat-value {
+                color: var(--text-primary);
+                font-weight: 600;
+            }
+            
+            /* Indicadores de carga */
+            .loading-indicator {
+                display: none;
+                text-align: center;
+                padding: 40px;
+                color: var(--text-secondary);
+            }
+            
+            .loading-indicator::after {
+                content: '';
+                display: inline-block;
+                width: 20px;
+                height: 20px;
+                border: 2px solid var(--border-color);
+                border-top: 2px solid var(--accent-color);
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+                margin-left: 10px;
+            }
+            
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
         }
     </style>
 </head>
@@ -813,6 +1203,10 @@
             <div class="nav-item" onclick="showPedidos('confirmed')">
                 <div class="nav-icon">✅</div>
                 <span>Pedidos Confirmados</span>
+            </div>
+            <div class="nav-item" onclick="showMetricas()">
+                <div class="nav-icon">📈</div>
+                <span>Métricas</span>
             </div>
         </nav>
         
@@ -867,6 +1261,76 @@
                 </div>
                 <div class="pedidos-content" id="contenidoTabla">
                     <div class="loading">Presiona "Actualizar" para cargar los pedidos</div>
+                </div>
+            </div>
+
+            <!-- Métricas Container -->
+            <div class="metricas-container" id="metricasContainer">
+                <!-- Filtros -->
+                <div class="metricas-filters">
+                    <div class="filter-group">
+                        <label class="filter-label">Filtrar por Rubro</label>
+                        <select id="filtroRubro" class="filter-select" onchange="filtrarMetricas()">
+                            <option value="">Todos los rubros</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label class="filter-label">Filtrar por Proveedor</label>
+                        <select id="filtroProveedor" class="filter-select" onchange="filtrarMetricas()">
+                            <option value="">Todos los proveedores</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label class="filter-label">Ordenar por</label>
+                        <select id="ordenMetricas" class="filter-select" onchange="filtrarMetricas()">
+                            <option value="cantidad">Cantidad vendida</option>
+                            <option value="ingresos">Ingresos generados</option>
+                            <option value="rentabilidad">Rentabilidad</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Grid de Métricas -->
+                <div class="metricas-grid">
+                    <!-- Productos Más Vendidos -->
+                    <div class="metrica-card">
+                        <div class="metrica-header">
+                            <h3 class="metrica-title">🏆 Productos Más Vendidos</h3>
+                        </div>
+                        <div class="metrica-content" id="productosMasVendidos">
+                            <div class="loading">Cargando datos...</div>
+                        </div>
+                    </div>
+
+                    <!-- Mejores Ingresos -->
+                    <div class="metrica-card">
+                        <div class="metrica-header">
+                            <h3 class="metrica-title">💰 Mejores Ingresos</h3>
+                        </div>
+                        <div class="metrica-content" id="mejoresIngresos">
+                            <div class="loading">Cargando datos...</div>
+                        </div>
+                    </div>
+
+                    <!-- Mayor Rentabilidad -->
+                    <div class="metrica-card">
+                        <div class="metrica-header">
+                            <h3 class="metrica-title">📈 Mayor Rentabilidad</h3>
+                        </div>
+                        <div class="metrica-content" id="mayorRentabilidad">
+                            <div class="loading">Cargando datos...</div>
+                        </div>
+                    </div>
+
+                    <!-- Análisis por Categoría -->
+                    <div class="metrica-card">
+                        <div class="metrica-header">
+                            <h3 class="metrica-title">📊 Análisis por Categoría</h3>
+                        </div>
+                        <div class="metrica-content" id="analisisCategorias">
+                            <div class="loading">Cargando datos...</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -961,9 +1425,14 @@
             const pendientes = pedidos.filter(p => (p.estado || 'PENDIENTE').toUpperCase() === 'PENDIENTE').length;
             const confirmados = pedidos.filter(p => (p.estado || '').toUpperCase() === 'CONFIRMADO').length;
             const total = pedidos.length;
-            const totalRevenue = pedidos
-                .filter(p => (p.estado || '').toUpperCase() === 'CONFIRMADO')
-                .reduce((sum, p) => sum + (parseFloat(p.total) || 0), 0);
+            
+            // Calcular ingresos, costos y ganancia
+            const pedidosConfirmados = pedidos.filter(p => (p.estado || '').toUpperCase() === 'CONFIRMADO');
+            const totalIngresos = pedidosConfirmados.reduce((sum, p) => sum + (parseFloat(p.total) || 0), 0);
+            
+            // Simular costo del 60% (en producción esto vendría de la base de datos)
+            const totalCostos = totalIngresos * 0.6;
+            const totalGanancia = totalIngresos - totalCostos;
 
             const statsHtml = `
                 <div class="stat-card">
@@ -999,22 +1468,257 @@
                 <div class="stat-card">
                     <div class="stat-header">
                         <div>
-                            <div class="stat-value">$${formatearPrecio(totalRevenue)}</div>
-                            <div class="stat-label">Ingresos Confirmados</div>
+                            <div class="stat-value">$${formatearPrecio(totalGanancia)}</div>
+                            <div class="stat-label">Ganancia por Ventas</div>
                         </div>
                         <div class="stat-icon revenue">💰</div>
                     </div>
-                    <div class="stat-change">Facturación</div>
+                    <div class="stat-change">
+                        Ingresos: $${formatearPrecio(totalIngresos)}<br>
+                        Costos: $${formatearPrecio(totalCostos)}
+                    </div>
                 </div>
             `;
 
             document.getElementById('statsGrid').innerHTML = statsHtml;
         }
 
+        function showMetricas() {
+            console.log('📈 Mostrando métricas');
+            
+            currentFilter = 'metricas';
+            
+            // Actualizar navegación activa
+            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+            document.querySelectorAll('.nav-item')[3].classList.add('active');
+            
+            // Actualizar títulos
+            document.getElementById('pageTitle').textContent = '📈 Métricas y Análisis';
+            
+            // Ocultar pedidos y mostrar métricas
+            document.querySelector('.pedidos-container').style.display = 'none';
+            document.getElementById('metricasContainer').classList.add('active');
+            
+            // Cargar datos de métricas
+            cargarMetricas();
+        }
+
+        async function cargarMetricas() {
+            console.log('📊 Cargando métricas de productos...');
+            
+            try {
+                // Obtener pedidos confirmados con detalles
+                const pedidosConfirmados = allPedidos.filter(p => 
+                    (p.estado || '').toUpperCase() === 'CONFIRMADO' && p.detalles && p.detalles.length > 0
+                );
+                
+                if (pedidosConfirmados.length === 0) {
+                    mostrarMensajeMetricas('No hay pedidos confirmados para analizar');
+                    return;
+                }
+                
+                // Procesar datos de productos
+                const productosData = procesarDatosProductos(pedidosConfirmados);
+                
+                // Mostrar métricas
+                mostrarProductosMasVendidos(productosData);
+                mostrarMejoresIngresos(productosData);
+                mostrarMayorRentabilidad(productosData);
+                mostrarAnalisisCategorias(productosData);
+                
+                // Cargar filtros
+                cargarFiltrosMetricas(productosData);
+                
+            } catch (error) {
+                console.error('❌ Error cargando métricas:', error);
+                mostrarMensajeMetricas('Error cargando métricas: ' + error.message);
+            }
+        }
+
+        function procesarDatosProductos(pedidosConfirmados) {
+            const productosMap = new Map();
+            
+            pedidosConfirmados.forEach(pedido => {
+                pedido.detalles.forEach(detalle => {
+                    const productoId = detalle.producto_id;
+                    const cantidad = parseInt(detalle.cantidad) || 0;
+                    const ingresos = parseFloat(detalle.importe) || 0;
+                    const precioUnitario = parseFloat(detalle.precio_unitario) || 0;
+                    
+                    // Simular costo (60% del precio de venta)
+                    const costoUnitario = precioUnitario * 0.6;
+                    const costoTotal = costoUnitario * cantidad;
+                    const ganancia = ingresos - costoTotal;
+                    const rentabilidad = ingresos > 0 ? (ganancia / ingresos) * 100 : 0;
+                    
+                    if (productosMap.has(productoId)) {
+                        const existing = productosMap.get(productoId);
+                        existing.cantidadVendida += cantidad;
+                        existing.ingresos += ingresos;
+                        existing.costos += costoTotal;
+                        existing.ganancia += ganancia;
+                        existing.rentabilidad = existing.ingresos > 0 ? (existing.ganancia / existing.ingresos) * 100 : 0;
+                    } else {
+                        productosMap.set(productoId, {
+                            producto_id: productoId,
+                            producto_nombre: detalle.producto_nombre || 'Producto sin nombre',
+                            categoria_id: detalle.categoria_id || 'Sin categoría',
+                            cantidadVendida: cantidad,
+                            ingresos: ingresos,
+                            costos: costoTotal,
+                            ganancia: ganancia,
+                            rentabilidad: rentabilidad,
+                            precioPromedio: precioUnitario
+                        });
+                    }
+                });
+            });
+            
+            return Array.from(productosMap.values());
+        }
+
+        function mostrarProductosMasVendidos(productos) {
+            const sorted = [...productos].sort((a, b) => b.cantidadVendida - a.cantidadVendida).slice(0, 10);
+            
+            const html = sorted.map((producto, index) => `
+                <div class="producto-item">
+                    <div class="ranking-number ${index < 3 ? 'top-3' : ''}">${index + 1}</div>
+                    <div class="producto-info">
+                        <div class="producto-nombre">${producto.producto_nombre}</div>
+                        <div class="producto-categoria">Categoría ${producto.categoria_id}</div>
+                    </div>
+                    <div class="producto-stats">
+                        <div class="stat-primary">${producto.cantidadVendida} unidades</div>
+                        <div class="stat-secondary">$${formatearPrecio(producto.ingresos)} ingresos</div>
+                    </div>
+                </div>
+            `).join('');
+            
+            document.getElementById('productosMasVendidos').innerHTML = html;
+        }
+
+        function mostrarMejoresIngresos(productos) {
+            const sorted = [...productos].sort((a, b) => b.ingresos - a.ingresos).slice(0, 10);
+            
+            const html = sorted.map((producto, index) => `
+                <div class="producto-item">
+                    <div class="ranking-number ${index < 3 ? 'top-3' : ''}">${index + 1}</div>
+                    <div class="producto-info">
+                        <div class="producto-nombre">${producto.producto_nombre}</div>
+                        <div class="producto-categoria">Categoría ${producto.categoria_id}</div>
+                    </div>
+                    <div class="producto-stats">
+                        <div class="stat-primary">$${formatearPrecio(producto.ingresos)}</div>
+                        <div class="stat-secondary">${producto.cantidadVendida} unidades</div>
+                    </div>
+                </div>
+            `).join('');
+            
+            document.getElementById('mejoresIngresos').innerHTML = html;
+        }
+
+        function mostrarMayorRentabilidad(productos) {
+            const sorted = [...productos].sort((a, b) => b.rentabilidad - a.rentabilidad).slice(0, 10);
+            
+            const html = sorted.map((producto, index) => `
+                <div class="producto-item">
+                    <div class="ranking-number ${index < 3 ? 'top-3' : ''}">${index + 1}</div>
+                    <div class="producto-info">
+                        <div class="producto-nombre">${producto.producto_nombre}</div>
+                        <div class="producto-categoria">Categoría ${producto.categoria_id}</div>
+                    </div>
+                    <div class="producto-stats">
+                        <div class="stat-primary">${producto.rentabilidad.toFixed(1)}%</div>
+                        <div class="stat-secondary">$${formatearPrecio(producto.ganancia)} ganancia</div>
+                    </div>
+                </div>
+            `).join('');
+            
+            document.getElementById('mayorRentabilidad').innerHTML = html;
+        }
+
+        function mostrarAnalisisCategorias(productos) {
+            const categoriasMap = new Map();
+            
+            productos.forEach(producto => {
+                const catId = producto.categoria_id;
+                if (categoriasMap.has(catId)) {
+                    const existing = categoriasMap.get(catId);
+                    existing.cantidadVendida += producto.cantidadVendida;
+                    existing.ingresos += producto.ingresos;
+                    existing.ganancia += producto.ganancia;
+                    existing.productos += 1;
+                } else {
+                    categoriasMap.set(catId, {
+                        categoria_id: catId,
+                        categoria_nombre: `Categoría ${catId}`,
+                        cantidadVendida: producto.cantidadVendida,
+                        ingresos: producto.ingresos,
+                        ganancia: producto.ganancia,
+                        productos: 1
+                    });
+                }
+            });
+            
+            const categorias = Array.from(categoriasMap.values())
+                .sort((a, b) => b.ingresos - a.ingresos);
+            
+            const html = categorias.map((categoria, index) => `
+                <div class="producto-item">
+                    <div class="ranking-number ${index < 3 ? 'top-3' : ''}">${index + 1}</div>
+                    <div class="producto-info">
+                        <div class="producto-nombre">${categoria.categoria_nombre}</div>
+                        <div class="producto-categoria">${categoria.productos} productos diferentes</div>
+                    </div>
+                    <div class="producto-stats">
+                        <div class="stat-primary">$${formatearPrecio(categoria.ingresos)}</div>
+                        <div class="stat-secondary">${categoria.cantidadVendida} unidades</div>
+                    </div>
+                </div>
+            `).join('');
+            
+            document.getElementById('analisisCategorias').innerHTML = html;
+        }
+
+        function cargarFiltrosMetricas(productos) {
+            // Obtener categorías únicas
+            const categorias = [...new Set(productos.map(p => p.categoria_id))].sort();
+            const filtroRubro = document.getElementById('filtroRubro');
+            
+            filtroRubro.innerHTML = '<option value="">Todos los rubros</option>';
+            categorias.forEach(cat => {
+                filtroRubro.innerHTML += `<option value="${cat}">Categoría ${cat}</option>`;
+            });
+            
+            // Para proveedores, por ahora usamos categorías (en producción vendría de la base de datos)
+            const filtroProveedor = document.getElementById('filtroProveedor');
+            filtroProveedor.innerHTML = '<option value="">Todos los proveedores</option>';
+            categorias.forEach(cat => {
+                filtroProveedor.innerHTML += `<option value="prov_${cat}">Proveedor ${cat}</option>`;
+            });
+        }
+
+        function filtrarMetricas() {
+            // Esta función se puede expandir para filtrar los datos mostrados
+            console.log('🔍 Aplicando filtros de métricas...');
+            cargarMetricas(); // Recargar con filtros aplicados
+        }
+
+        function mostrarMensajeMetricas(mensaje) {
+            const containers = ['productosMasVendidos', 'mejoresIngresos', 'mayorRentabilidad', 'analisisCategorias'];
+            containers.forEach(id => {
+                document.getElementById(id).innerHTML = `<div class="loading">${mensaje}</div>`;
+            });
+        }
+
         function showPedidos(filterType) {
             console.log(`🔍 Mostrando pedidos: ${filterType}`);
             
             currentFilter = filterType;
+            
+            // Mostrar contenedor de pedidos y ocultar métricas
+            document.querySelector('.pedidos-container').style.display = 'block';
+            document.getElementById('metricasContainer').classList.remove('active');
             
             // Actualizar navegación activa
             document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
