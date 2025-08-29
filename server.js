@@ -6,7 +6,6 @@ import { google } from 'googleapis';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { parse } from 'csv-parse/sync';
 
 dotenv.config();
 
@@ -18,8 +17,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json());
 app.use(express.static('public'));
 
 // Configuración de Google Sheets
@@ -37,69 +35,11 @@ const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID;
 // Bot de Telegram
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN || 'dummy_token');
 
-// Estado del usuario (en memoria - en producción usar base de datos)
+// Estado del usuario (en memoria)
 const userStates = new Map();
 const userCarts = new Map();
-const searchStates = new Map();
 
-// Función para normalizar números (convertir comas a puntos y limpiar formato)
-function normalizarNumero(valor) {
-  if (valor === '' || valor === null || valor === undefined || valor === 'null' || valor === 'undefined') {
-    return 0;
-  }
-  
-  // Convertir a string para procesamiento
-  let valorStr = String(valor).trim();
-  
-  // Si ya es un número válido, devolverlo
-  if (!isNaN(valorStr) && !isNaN(parseFloat(valorStr))) {
-    return parseFloat(valorStr);
-  }
-  
-  // Limpiar el formato de números:
-  // - Remover espacios
-  // - Reemplazar comas por puntos (formato decimal argentino -> estadounidense)
-  // - Remover caracteres no numéricos excepto puntos y signos negativos
-  valorStr = valorStr
-    .replace(/\s/g, '') // Remover espacios
-    .replace(/,/g, '.') // Reemplazar comas por puntos
-    .replace(/[^\d.-]/g, ''); // Mantener solo dígitos, puntos y signos negativos
-  
-  // Convertir a número
-  const numero = parseFloat(valorStr);
-  
-  // Si no es un número válido, devolver 0
-  return isNaN(numero) ? 0 : numero;
-}
-
-// Definir qué columnas deben ser numéricas para cada hoja
-const columnasNumericas = {
-  Clientes: ['cliente_id', 'lista'],
-  Categorias: ['categoria_id'],
-  Productos: ['producto_id', 'categoria_id', 'precio1', 'precio2', 'precio3', 'precio4', 'precio5', 'proveedor_id'],
-  Pedidos: ['cliente_id', 'items_cantidad', 'total'],
-  DetallePedidos: ['producto_id', 'categoria_id', 'cantidad', 'precio_unitario', 'importe'],
-  Metricas: ['producto_id', 'categoria_id', 'proveedor_id', 'cantidad_vendida', 'ingresos_totales', 'costo_total_estimado', 'ganancia_total_estimada', 'rentabilidad_porcentual']
-};
-
-// Función para convertir valores a números, tratando vacíos como 0
-function convertirANumeroOCero(valor) {
-  // Si está vacío, null, undefined o es string vacío
-  if (valor === '' || valor === null || valor === undefined || valor === 'null' || valor === 'undefined') {
-    return 0;
-  }
-  
-  // Si ya es un número
-  if (typeof valor === 'number') {
-    return isNaN(valor) || !isFinite(valor) ? 0 : valor;
-  }
-  
-  // Intentar convertir a número
-  const numero = Number(valor);
-  return isNaN(numero) || !isFinite(numero) ? 0 : numero;
-}
-
-// Datos de ejemplo (fallback si no hay Google Sheets)
+// Datos de ejemplo
 const datosEjemplo = {
   clientes: [
     { cliente_id: 1, nombre: 'Juan Pérez', lista: 1, localidad: 'Centro' },
@@ -116,11 +56,16 @@ const datosEjemplo = {
     { categoria_id: 5, categoria_nombre: 'Conservas' }
   ],
   productos: [
-    { producto_id: 1, categoria_id: 1, producto_nombre: 'Oreo Original 117g', precio1: 450, precio2: 420, precio3: 400, precio4: 380, precio5: 360, activo: 'SI', proveedor_id: 'PROV001', proveedor_nombre: 'Mondelez Argentina' },
-    { producto_id: 2, categoria_id: 1, producto_nombre: 'Pepitos Chocolate 100g', precio1: 380, precio2: 360, precio3: 340, precio4: 320, precio5: 300, activo: 'SI', proveedor_id: 'PROV002', proveedor_nombre: 'Arcor S.A.' },
-    { producto_id: 3, categoria_id: 2, producto_nombre: 'Coca Cola 500ml', precio1: 350, precio2: 330, precio3: 310, precio4: 290, precio5: 270, activo: 'SI', proveedor_id: 'PROV003', proveedor_nombre: 'Coca-Cola FEMSA' },
-    { producto_id: 4, categoria_id: 3, producto_nombre: 'Leche Entera 1L', precio1: 280, precio2: 260, precio3: 240, precio4: 220, precio5: 200, activo: 'SI', proveedor_id: 'PROV004', proveedor_nombre: 'La Serenísima' },
-    { producto_id: 5, categoria_id: 4, producto_nombre: 'Pan Lactal 500g', precio1: 320, precio2: 300, precio3: 280, precio4: 260, precio5: 240, activo: 'SI', proveedor_id: 'PROV005', proveedor_nombre: 'Bimbo Argentina' }
+    { producto_id: 1, categoria_id: 1, producto_nombre: 'Oreo Original 117g', precio: 450, activo: 'SI' },
+    { producto_id: 2, categoria_id: 1, producto_nombre: 'Pepitos Chocolate 100g', precio: 380, activo: 'SI' },
+    { producto_id: 3, categoria_id: 2, producto_nombre: 'Coca Cola 500ml', precio: 350, activo: 'SI' },
+    { producto_id: 4, categoria_id: 3, producto_nombre: 'Leche Entera 1L', precio: 280, activo: 'SI' },
+    { producto_id: 5, categoria_id: 4, producto_nombre: 'Pan Lactal 500g', precio: 320, activo: 'SI' }
+  ],
+  detallepedidos: [
+    { detalle_id: 'DET001', pedido_id: 'PED001', producto_id: 1, producto_nombre: 'Oreo Original 117g', categoria_id: 1, cantidad: 2, precio_unitario: 450, importe: 900 },
+    { detalle_id: 'DET002', pedido_id: 'PED001', producto_id: 4, producto_nombre: 'Leche Entera 1L', categoria_id: 3, cantidad: 1, precio_unitario: 280, importe: 280 },
+    { detalle_id: 'DET003', pedido_id: 'PED002', producto_id: 3, producto_nombre: 'Coca Cola 500ml', categoria_id: 2, cantidad: 2, precio_unitario: 350, importe: 700 }
   ]
 };
 
@@ -139,60 +84,6 @@ function getUserCart(userId) {
 
 function setUserCart(userId, cart) {
   userCarts.set(userId, cart);
-}
-
-function getSearchState(userId) {
-  return searchStates.get(userId) || {};
-}
-
-function setSearchState(userId, state) {
-  searchStates.set(userId, state);
-}
-
-// Función para procesar datos de Google Sheets con tipos correctos
-function procesarDatosSheet(rows, nombreHoja) {
-  if (!rows || rows.length === 0) return [];
-  
-  const headers = rows[0];
-  const columnasNum = columnasNumericas[nombreHoja] || [];
-  
-  return rows.slice(1)
-    .filter(row => row && row.length > 0 && row[0] && row[0].toString().trim())
-    .map(row => {
-      const obj = {};
-      
-      headers.forEach((nombreColumna, index) => {
-        const celda = row[index] ? row[index].toString().trim() : '';
-        
-        // Si esta columna debe ser numérica
-        if (columnasNum.includes(nombreColumna)) {
-          obj[nombreColumna] = normalizarNumero(celda);
-        } else {
-          // Para columnas no numéricas, mantener el valor original
-          // pero convertir null/undefined a string vacío
-          if (celda === null || celda === undefined) {
-            obj[nombreColumna] = '';
-          } else {
-            obj[nombreColumna] = celda;
-          }
-        }
-      });
-      
-      return obj;
-    })
-    .filter(obj => {
-      // Filtrar objetos con datos válidos según la hoja
-      if (nombreHoja === 'Clientes') {
-        return obj.cliente_id && obj.nombre && obj.nombre !== '';
-      }
-      if (nombreHoja === 'Categorias') {
-        return obj.categoria_id && obj.categoria_nombre && obj.categoria_nombre !== '';
-      }
-      if (nombreHoja === 'Productos') {
-        return obj.producto_id && obj.producto_nombre && obj.producto_nombre !== '';
-      }
-      return Object.values(obj).some(val => val && val !== '');
-    });
 }
 
 // Función para obtener datos de Google Sheets
@@ -215,31 +106,17 @@ async function obtenerDatosSheet(nombreHoja) {
     if (rows.length === 0) return [];
 
     const headers = rows[0];
-    console.log(`📋 Encabezados:`, headers);
     
-    // Obtener las columnas numéricas para esta hoja
-    const columnasNum = columnasNumericas[nombreHoja] || [];
-    
-    // Filtrar filas vacías y mapear datos
     const data = rows.slice(1)
-      .filter(row => row && row.length > 0 && row[0] && row[0].toString().trim()) // Filtrar filas vacías
+      .filter(row => row && row.length > 0 && row[0] && row[0].toString().trim())
       .map(row => {
-      const obj = {};
-      headers.forEach((header, index) => {
-        const valor = row[index] ? row[index].toString().trim() : '';
-        
-        // Si esta columna debe ser numérica, convertir a número (vacíos = 0)
-        if (columnasNum.includes(header)) {
-          obj[header] = convertirANumeroOCero(valor);
-        } else {
-          // Para columnas de texto, mantener como string
-          obj[header] = valor;
-        }
-      });
-      return obj;
-    })
+        const obj = {};
+        headers.forEach((header, index) => {
+          obj[header] = row[index] ? row[index].toString().trim() : '';
+        });
+        return obj;
+      })
       .filter(obj => {
-        // Filtrar objetos con datos válidos según la hoja
         if (nombreHoja === 'Clientes') {
           return obj.cliente_id && obj.nombre && obj.nombre !== '';
         }
@@ -268,17 +145,12 @@ async function agregarDatosSheet(nombreHoja, datos) {
       return true;
     }
 
-    // Procesar datos para convertir números correctamente
-    const datosProcessados = datos.map(valor => {
-      return convertirANumeroOCero(valor);
-    });
-
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: `${nombreHoja}!A:Z`,
-     valueInputOption: 'USER_ENTERED',
+      valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: [datosProcessados]
+        values: [datos]
       }
     });
 
@@ -289,13 +161,7 @@ async function agregarDatosSheet(nombreHoja, datos) {
   }
 }
 
-// Función para calcular precio según lista del cliente
-function calcularPrecio(producto, listaCliente) {
-  const precioKey = `precio${listaCliente}`;
-  return producto[precioKey] || producto.precio1 || 0;
-}
-
-// Función para generar ID de pedido autoincremental
+// Función para generar ID de pedido
 async function generarPedidoId() {
   try {
     if (!SPREADSHEET_ID) {
@@ -304,7 +170,6 @@ async function generarPedidoId() {
 
     const pedidos = await obtenerDatosSheet('Pedidos');
     
-    // Encontrar el último número de pedido
     let ultimoNumero = 0;
     pedidos.forEach(pedido => {
       if (pedido.pedido_id && pedido.pedido_id.startsWith('PD')) {
@@ -324,95 +189,142 @@ async function generarPedidoId() {
   }
 }
 
-// Función para agrupar clientes por localidad
-function agruparClientesPorLocalidad(clientes) {
-  const agrupados = {};
+// Comandos del bot
+bot.on('callback_query', async (ctx) => {
+  const userId = ctx.from.id;
+  const callbackData = ctx.callbackQuery.data;
   
-  clientes.forEach(cliente => {
-    const localidad = cliente.localidad || 'Sin localidad';
-    if (!agrupados[localidad]) {
-      agrupados[localidad] = [];
-    }
-    agrupados[localidad].push(cliente);
-  });
-  
-  return agrupados;
-}
-
-// Función para actualizar métricas en Google Sheets
-async function actualizarMetricasEnSheets() {
   try {
-    console.log('📊 Iniciando actualización de métricas...');
+    await ctx.answerCbQuery();
     
-    if (!SPREADSHEET_ID) {
-      console.log('⚠️ Google Sheets no configurado, no se pueden actualizar métricas');
-      return false;
-    }
-    
-    // Obtener todos los datos necesarios
-    console.log('📋 Obteniendo datos de las hojas...');
-    const [pedidos, detalles, productos, categorias] = await Promise.all([
-      obtenerDatosSheet('Pedidos'),
-      obtenerDatosSheet('DetallePedidos'),
-      obtenerDatosSheet('Productos'),
-      obtenerDatosSheet('Categorias')
-    ]);
-    
-    console.log(`📊 Datos obtenidos: ${pedidos.length} pedidos, ${detalles.length} detalles, ${productos.length} productos`);
-    
-    // Filtrar solo pedidos confirmados
-    const pedidosConfirmados = pedidos.filter(pedido => 
-      pedido.estado && pedido.estado.toUpperCase() === 'CONFIRMADO'
-    );
-    
-    console.log(`✅ Pedidos confirmados: ${pedidosConfirmados.length}`);
-    
-    // Obtener IDs de pedidos confirmados
-    const pedidosConfirmadosIds = new Set(pedidosConfirmados.map(p => p.pedido_id));
-    
-    // Filtrar detalles solo de pedidos confirmados
-    const detallesConfirmados = detalles.filter(detalle => 
-      pedidosConfirmadosIds.has(detalle.pedido_id)
-    );
-    
-    console.log(`📋 Detalles de pedidos confirmados: ${detallesConfirmados.length}`);
-    
-    // Crear mapas para búsqueda rápida
-    const productosMap = new Map();
-    productos.forEach(producto => {
-      productosMap.set(producto.producto_id.toString(), producto);
-    });
-    
-    const categoriasMap = new Map();
-    categorias.forEach(categoria => {
-      categoriasMap.set(categoria.categoria_id.toString(), categoria);
-    });
-    
-    // Procesar métricas por producto
-    const metricas = new Map();
-    
-    detallesConfirmados.forEach(detalle => {
-      const productoId = detalle.producto_id.toString();
-      const cantidad = parseInt(detalle.cantidad) || 0;
-      const importe = parseFloat(detalle.importe) || 0;
+    if (callbackData === 'hacer_pedido') {
+      const clientes = await obtenerDatosSheet('Clientes');
       
-      if (!metricas.has(productoId)) {
-        const producto = productosMap.get(productoId);
-        const categoria = producto ? categoriasMap.get(producto.categoria_id.toString()) : null;
-        
-        metricas.set(productoId, {
-          producto_id: productoId,
-          producto_nombre: detalle.producto_nombre || (producto ? producto.producto_nombre : 'Producto Desconocido'),
-          categoria_id: producto ? producto.categoria_id : '',
-          categoria_nombre: categoria ? categoria.categoria_nombre : 'Sin Categoría',
-          proveedor_id: producto ? (producto.proveedor_id || 'SIN_PROV') : 'SIN_PROV',
-          proveedor_nombre: producto ? (producto.proveedor_nombre || 'Sin Proveedor') : 'Sin Proveedor',
-          cantidad_vendida: 0,
-          ingresos_totales: 0,
-          costo_total_estimado: 0,
-          ganancia_total_estimada: 0,
-          rentabilidad_porcentual: 0
-        });
+      if (clientes.length === 0) {
+        await ctx.reply('❌ No hay clientes disponibles');
+        return;
       }
       
-      const metrica = metricas.get(
+      setUserState(userId, { step: 'seleccionar_cliente' });
+      
+      const keyboard = clientes.map(cliente => [{
+        text: `👤 ${cliente.nombre}`,
+        callback_data: `cliente_${cliente.cliente_id}`
+      }]);
+      
+      await ctx.reply('👤 Selecciona el cliente:', {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (callbackData.startsWith('cliente_')) {
+      const clienteId = parseInt(callbackData.split('_')[1]);
+      
+      const clientes = await obtenerDatosSheet('Clientes');
+      const cliente = clientes.find(c => c.cliente_id == clienteId);
+      
+      if (!cliente) {
+        await ctx.reply('❌ Cliente no encontrado');
+        return;
+      }
+      
+      setUserState(userId, { 
+        step: 'seleccionar_categoria', 
+        cliente: cliente,
+        pedido_id: await generarPedidoId()
+      });
+      
+      const categorias = await obtenerDatosSheet('Categorias');
+      
+      const keyboard = categorias.map(cat => [{
+        text: `📂 ${cat.categoria_nombre}`,
+        callback_data: `categoria_${cat.categoria_id}`
+      }]);
+      
+      await ctx.editMessageText(`✅ Cliente: ${cliente.nombre}\n\n📂 Selecciona una categoría:`, {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error en callback:', error);
+    await ctx.reply('❌ Ocurrió un error. Intenta nuevamente.');
+  }
+});
+
+// Configurar webhook
+app.post('/webhook', (req, res) => {
+  try {
+    bot.handleUpdate(req.body);
+    res.status(200).send('OK');
+  } catch (error) {
+    console.error('❌ Error en webhook:', error);
+    res.status(500).send('Error');
+  }
+});
+
+// API Routes
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    port: PORT
+  });
+});
+
+app.get('/api/info', (req, res) => {
+  res.json({
+    name: 'Sistema Distribuidora Bot',
+    version: '1.0.0',
+    status: 'running',
+    features: [
+      'Bot de Telegram',
+      'Integración Google Sheets',
+      'Sistema de pedidos'
+    ]
+  });
+});
+
+app.get('/api/clientes', async (req, res) => {
+  try {
+    const clientes = await obtenerDatosSheet('Clientes');
+    res.json({ success: true, clientes });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/productos', async (req, res) => {
+  try {
+    const productos = await obtenerDatosSheet('Productos');
+    res.json({ success: true, productos });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/detalles-pedidos', async (req, res) => {
+  try {
+    const detalles = await obtenerDatosSheet('DetallePedidos');
+    res.json({ success: true, detalles });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Iniciar servidor
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor iniciado en puerto ${PORT}`);
+  console.log(`🌐 Dashboard: http://localhost:${PORT}`);
+  console.log(`🤖 Bot de Telegram configurado`);
+  console.log(`📊 Google Sheets: ${SPREADSHEET_ID ? 'Configurado' : 'No configurado'}`);
+});
+
+// Manejo de errores
+process.on('uncaughtException', (error) => {
+  console.error('❌ Error no capturado:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Promesa rechazada no manejada:', reason);
+});
