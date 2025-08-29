@@ -312,19 +312,230 @@ app.get('/api/detalles-pedidos', async (req, res) => {
   }
 });
 
+app.get('/api/pedidos-completos', async (req, res) => {
+  try {
+    console.log('📊 Obteniendo pedidos completos...');
+    
+    const pedidos = await obtenerDatosSheet('Pedidos');
+    const detalles = await obtenerDatosSheet('DetallePedidos');
+    
+    console.log(`📋 Pedidos: ${pedidos.length}, Detalles: ${detalles.length}`);
+    
+    const pedidosCompletos = pedidos.map(pedido => {
+      const pedidoId = pedido.pedido_id;
+      
+      const detallesPedido = detalles.filter(detalle => 
+        detalle.pedido_id === pedidoId
+      );
+      
+      const totalCalculado = detallesPedido.reduce((sum, detalle) => {
+        const importe = parseFloat(detalle.importe) || 0;
+        return sum + importe;
+      }, 0);
+      
+      const totalFinal = parseFloat(pedido.total) || totalCalculado;
+      
+      return {
+        ...pedido,
+        total: totalFinal,
+        total_calculado: totalCalculado,
+        detalles: detallesPedido,
+        cantidad_items: detallesPedido.length
+      };
+    });
+    
+    pedidosCompletos.sort((a, b) => {
+      const fechaA = new Date(a.fecha_hora || 0);
+      const fechaB = new Date(b.fecha_hora || 0);
+      return fechaB - fechaA;
+    });
+    
+    console.log(`✅ ${pedidosCompletos.length} pedidos completos procesados`);
+    
+    res.json({ 
+      success: true, 
+      pedidos: pedidosCompletos,
+      total_pedidos: pedidosCompletos.length,
+      total_detalles: detalles.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Error obteniendo pedidos completos:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/upload-clientes-csv', upload.single('csvFile'), async (req, res) => {
+  try {
+    console.log('📤 Recibiendo archivo CSV de clientes...');
+    
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'No se recibió ningún archivo' 
+      });
+    }
+    
+    const csvContent = req.file.buffer.toString('utf8');
+    console.log('📄 Contenido CSV recibido, parseando...');
+    
+    const records = parse(csvContent, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true
+    });
+    
+    console.log(`📊 ${records.length} registros parseados`);
+    
+    if (records.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'El archivo CSV está vacío o no tiene el formato correcto'
+      });
+    }
+    
+    let insertados = 0;
+    let errores = 0;
+    
+    for (const record of records) {
+      try {
+        if (!record.cliente_id || !record.nombre) {
+          console.log('⚠️ Registro incompleto:', record);
+          errores++;
+          continue;
+        }
+        
+        const clienteData = [
+          record.cliente_id,
+          record.nombre,
+          record.lista || 1,
+          record.localidad || 'Sin localidad'
+        ];
+        
+        const resultado = await agregarDatosSheet('Clientes', clienteData);
+        
+        if (resultado) {
+          insertados++;
+          console.log(`✅ Cliente insertado: ${record.nombre}`);
+        } else {
+          errores++;
+          console.log(`❌ Error insertando: ${record.nombre}`);
+        }
+        
+      } catch (error) {
+        console.error(`❌ Error procesando registro:`, error);
+        errores++;
+      }
+    }
+    
+    console.log(`📊 Resumen: ${insertados} insertados, ${errores} errores`);
+    
+    res.json({
+      success: true,
+      message: `Clientes cargados exitosamente`,
+      insertados: insertados,
+      errores: errores,
+      total: records.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Error procesando CSV:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+app.post('/api/upload-productos-csv', upload.single('csvFile'), async (req, res) => {
+  try {
+    console.log('📤 Recibiendo archivo CSV de productos...');
+    
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'No se recibió ningún archivo' 
+      });
+    }
+    
+    const csvContent = req.file.buffer.toString('utf8');
+    console.log('📄 Contenido CSV recibido, parseando...');
+    
+    const records = parse(csvContent, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true
+    });
+    
+    console.log(`📊 ${records.length} registros parseados`);
+    
+    if (records.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'El archivo CSV está vacío o no tiene el formato correcto'
+      });
+    }
+    
+    let insertados = 0;
+    let errores = 0;
+    
+    for (const record of records) {
+      try {
+        if (!record.producto_id || !record.producto_nombre) {
+          console.log('⚠️ Registro incompleto:', record);
+          errores++;
+          continue;
+        }
+        
+        const productoData = [
+          record.producto_id,
+          record.categoria_id || 1,
+          record.producto_nombre,
+          record.precio || 0,
+          record.activo || 'SI'
+        ];
+        
+        const resultado = await agregarDatosSheet('Productos', productoData);
+        
+        if (resultado) {
+          insertados++;
+          console.log(`✅ Producto insertado: ${record.producto_nombre}`);
+        } else {
+          errores++;
+          console.log(`❌ Error insertando: ${record.producto_nombre}`);
+        }
+        
+      } catch (error) {
+        console.error(`❌ Error procesando registro:`, error);
+        errores++;
+      }
+    }
+    
+    console.log(`📊 Resumen: ${insertados} insertados, ${errores} errores`);
+    
+    res.json({
+      success: true,
+      message: `Productos cargados exitosamente`,
+      insertados: insertados,
+      errores: errores,
+      total: records.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Error procesando CSV:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
 // Iniciar servidor
 app.listen(PORT, () => {
   console.log(`🚀 Servidor iniciado en puerto ${PORT}`);
   console.log(`🌐 Dashboard: http://localhost:${PORT}`);
   console.log(`🤖 Bot de Telegram configurado`);
-  console.log(`📊 Google Sheets: ${SPREADSHEET_ID ? 'Configurado' : 'No configurado'}`);
-});
-
-// Manejo de errores
-process.on('uncaughtException', (error) => {
-  console.error('❌ Error no capturado:', error);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Promesa rechazada no manejada:', reason);
-});
+  console.log(`📊 Google
+  )
+}
+)

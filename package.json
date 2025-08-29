@@ -26,6 +26,7 @@
     "google-auth-library": "^9.4.1",
     "google-spreadsheet": "^4.1.2",
     "googleapis": "^128.0.0",
+    "multer": "2.0.2",
     "telegraf": "^4.16.3"
   },
   "engines": {

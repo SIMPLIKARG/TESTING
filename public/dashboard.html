@@ -1,330 +1,751 @@
-import express from 'express';
-import cors from 'cors';
-import { Telegraf } from 'telegraf';
-import { GoogleAuth } from 'google-auth-library';
-import { google } from 'googleapis';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Sistema Distribuidora</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-dotenv.config();
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 250px;
+            height: 100vh;
+            background: rgba(44, 62, 80, 0.95);
+            backdrop-filter: blur(10px);
+            color: white;
+            padding: 20px;
+            overflow-y: auto;
+            z-index: 1000;
+        }
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+        .sidebar h2 {
+            margin-bottom: 30px;
+            font-size: 1.5rem;
+            text-align: center;
+            color: #ecf0f1;
+        }
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.static('public'));
+        .nav-item {
+            display: block;
+            padding: 15px 20px;
+            margin: 5px 0;
+            background: rgba(52, 73, 94, 0.7);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            text-align: left;
+            font-size: 0.95rem;
+        }
 
-// Configuración de Google Sheets
-const auth = new GoogleAuth({
-  credentials: {
-    client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-  },
-  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-});
+        .nav-item:hover {
+            background: rgba(52, 152, 219, 0.8);
+            transform: translateX(5px);
+        }
 
-const sheets = google.sheets({ version: 'v4', auth });
-const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID;
+        .nav-item.active {
+            background: #3498db;
+        }
 
-// Bot de Telegram
-const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN || 'dummy_token');
+        .main-content {
+            margin-left: 250px;
+            padding: 30px;
+            min-height: 100vh;
+        }
 
-// Estado del usuario (en memoria)
-const userStates = new Map();
-const userCarts = new Map();
+        .header {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
 
-// Datos de ejemplo
-const datosEjemplo = {
-  clientes: [
-    { cliente_id: 1, nombre: 'Juan Pérez', lista: 1, localidad: 'Centro' },
-    { cliente_id: 2, nombre: 'María González', lista: 2, localidad: 'Norte' },
-    { cliente_id: 3, nombre: 'Carlos Rodríguez', lista: 1, localidad: 'Centro' },
-    { cliente_id: 4, nombre: 'Ana Martínez', lista: 3, localidad: 'Sur' },
-    { cliente_id: 5, nombre: 'Luis Fernández', lista: 2, localidad: 'Norte' }
-  ],
-  categorias: [
-    { categoria_id: 1, categoria_nombre: 'Galletitas' },
-    { categoria_id: 2, categoria_nombre: 'Bebidas' },
-    { categoria_id: 3, categoria_nombre: 'Lácteos' },
-    { categoria_id: 4, categoria_nombre: 'Panadería' },
-    { categoria_id: 5, categoria_nombre: 'Conservas' }
-  ],
-  productos: [
-    { producto_id: 1, categoria_id: 1, producto_nombre: 'Oreo Original 117g', precio: 450, activo: 'SI' },
-    { producto_id: 2, categoria_id: 1, producto_nombre: 'Pepitos Chocolate 100g', precio: 380, activo: 'SI' },
-    { producto_id: 3, categoria_id: 2, producto_nombre: 'Coca Cola 500ml', precio: 350, activo: 'SI' },
-    { producto_id: 4, categoria_id: 3, producto_nombre: 'Leche Entera 1L', precio: 280, activo: 'SI' },
-    { producto_id: 5, categoria_id: 4, producto_nombre: 'Pan Lactal 500g', precio: 320, activo: 'SI' }
-  ],
-  detallepedidos: [
-    { detalle_id: 'DET001', pedido_id: 'PED001', producto_id: 1, producto_nombre: 'Oreo Original 117g', categoria_id: 1, cantidad: 2, precio_unitario: 450, importe: 900 },
-    { detalle_id: 'DET002', pedido_id: 'PED001', producto_id: 4, producto_nombre: 'Leche Entera 1L', categoria_id: 3, cantidad: 1, precio_unitario: 280, importe: 280 },
-    { detalle_id: 'DET003', pedido_id: 'PED002', producto_id: 3, producto_nombre: 'Coca Cola 500ml', categoria_id: 2, cantidad: 2, precio_unitario: 350, importe: 700 }
-  ]
-};
+        .header h1 {
+            color: #2c3e50;
+            font-size: 2.5rem;
+            font-weight: 700;
+        }
 
-// Funciones auxiliares
-function getUserState(userId) {
-  return userStates.get(userId) || { step: 'idle' };
-}
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #3498db;
+            color: white;
+            margin: 0 5px;
+        }
 
-function setUserState(userId, state) {
-  userStates.set(userId, state);
-}
+        .btn:hover {
+            background: #2980b9;
+            transform: translateY(-2px);
+        }
 
-function getUserCart(userId) {
-  return userCarts.get(userId) || [];
-}
+        .btn.success {
+            background: #27ae60;
+        }
 
-function setUserCart(userId, cart) {
-  userCarts.set(userId, cart);
-}
+        .btn.success:hover {
+            background: #229954;
+        }
 
-// Función para obtener datos de Google Sheets
-async function obtenerDatosSheet(nombreHoja) {
-  try {
-    if (!SPREADSHEET_ID) {
-      console.log(`⚠️ Google Sheets no configurado, usando datos de ejemplo`);
-      return datosEjemplo[nombreHoja.toLowerCase()] || [];
-    }
+        .btn.danger {
+            background: #e74c3c;
+        }
 
-    console.log(`📊 Obteniendo ${nombreHoja}...`);
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${nombreHoja}!A:Z`,
-    });
+        .btn.danger:hover {
+            background: #c0392b;
+        }
 
-    const rows = response.data.values || [];
-    console.log(`📋 ${nombreHoja}: ${rows.length} filas`);
-    
-    if (rows.length === 0) return [];
+        .content-section {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            overflow: hidden;
+            margin-bottom: 30px;
+        }
 
-    const headers = rows[0];
-    
-    const data = rows.slice(1)
-      .filter(row => row && row.length > 0 && row[0] && row[0].toString().trim())
-      .map(row => {
-        const obj = {};
-        headers.forEach((header, index) => {
-          obj[header] = row[index] ? row[index].toString().trim() : '';
+        .section-header {
+            background: #2c3e50;
+            color: white;
+            padding: 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .section-content {
+            padding: 30px;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        th {
+            background: #34495e;
+            color: white;
+            padding: 15px 10px;
+            text-align: left;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        td {
+            padding: 12px 10px;
+            border-bottom: 1px solid #ecf0f1;
+            vertical-align: middle;
+        }
+
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #7f8c8d;
+            font-size: 1.1rem;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px;
+            text-align: center;
+        }
+
+        .precio {
+            text-align: right;
+            font-weight: 600;
+            color: #27ae60;
+        }
+
+        .cantidad {
+            text-align: center;
+            font-weight: 600;
+            color: #7f8c8d;
+        }
+
+        .estado {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .estado.pendiente {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .estado.confirmado {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .estado.cancelado {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .upload-area {
+            border: 2px dashed #bdc3c7;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+            transition: all 0.3s ease;
+        }
+
+        .upload-area:hover {
+            border-color: #3498db;
+            background: #f8f9fa;
+        }
+
+        .upload-area.dragover {
+            border-color: #27ae60;
+            background: #d5f4e6;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .upload-btn {
+            background: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin: 10px;
+        }
+
+        .upload-btn:hover {
+            background: #2980b9;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.3s ease;
+            }
+            
+            .sidebar.active {
+                transform: translateX(0%);
+            }
+
+            .main-content {
+                margin-left: 0;
+            }
+
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .header h1 {
+                margin-bottom: 15px;
+            }
+
+            .btn {
+                width: 100%;
+                margin: 5px 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>Distribuidora</h2>
+        <button class="nav-item active" data-target="pedidos-pendientes">Pedidos Pendientes</button>
+        <button class="nav-item" data-target="todos-los-pedidos">Todos los Pedidos</button>
+        <button class="nav-item" data-target="pedidos-confirmados">Pedidos Confirmados</button>
+        <button class="nav-item" data-target="metricas">Métricas</button>
+        <hr style="border-color: rgba(255,255,255,0.2); margin: 20px 0;">
+        <button class="nav-item" id="toggleDarkMode">Modo Oscuro</button>
+        <button class="nav-item" data-target="cargar-clientes">Cargar Clientes</button>
+        <button class="nav-item" data-target="cargar-productos">Cargar Productos</button>
+    </div>
+
+    <div class="main-content">
+        <div class="header">
+            <h1 id="pageTitle">Pedidos Pendientes</h1>
+            <div>
+                <button class="btn" id="refreshButton">🔄 Actualizar</button>
+                <button class="btn" id="printButton">🖨️ Imprimir</button>
+            </div>
+        </div>
+
+        <div id="pedidos-pendientes" class="content-section">
+            <div class="section-header">
+                <h2>Pedidos Pendientes</h2>
+            </div>
+            <div class="section-content">
+                <div class="table-container" id="pedidosPendientesTable">
+                    <div class="loading">🔄 Cargando pedidos pendientes...</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="todos-los-pedidos" class="content-section hidden">
+            <div class="section-header">
+                <h2>Todos los Pedidos</h2>
+            </div>
+            <div class="section-content">
+                <div class="table-container" id="todosLosPedidosTable">
+                    <div class="loading">🔄 Cargando todos los pedidos...</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="pedidos-confirmados" class="content-section hidden">
+            <div class="section-header">
+                <h2>Pedidos Confirmados</h2>
+            </div>
+            <div class="section-content">
+                <div class="table-container" id="pedidosConfirmadosTable">
+                    <div class="loading">🔄 Cargando pedidos confirmados...</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="metricas" class="content-section hidden">
+            <div class="section-header">
+                <h2>Métricas</h2>
+            </div>
+            <div class="section-content">
+                <p>Contenido de Métricas</p>
+            </div>
+        </div>
+
+        <div id="cargar-clientes" class="content-section hidden">
+            <div class="section-header">
+                <h2>Cargar Clientes (CSV)</h2>
+            </div>
+            <div class="section-content">
+                <div class="upload-area" id="uploadAreaClientes">
+                    <p>Arrastra y suelta tu archivo CSV de clientes aquí, o haz clic para seleccionarlo.</p>
+                    <input type="file" id="fileInputClientes" class="file-input" accept=".csv">
+                    <button class="upload-btn" onclick="document.getElementById('fileInputClientes').click()">Seleccionar archivo</button>
+                </div>
+                <div id="uploadStatusClientes" style="margin-top: 20px; text-align: center; font-weight: bold;"></div>
+            </div>
+        </div>
+
+        <div id="cargar-productos" class="content-section hidden">
+            <div class="section-header">
+                <h2>Cargar Productos (CSV)</h2>
+            </div>
+            <div class="section-content">
+                <div class="upload-area" id="uploadAreaProductos">
+                    <p>Arrastra y suelta tu archivo CSV de productos aquí, o haz clic para seleccionarlo.</p>
+                    <input type="file" id="fileInputProductos" class="file-input" accept=".csv">
+                    <button class="upload-btn" onclick="document.getElementById('fileInputProductos').click()">Seleccionar archivo</button>
+                </div>
+                <div id="uploadStatusProductos" style="margin-top: 20px; text-align: center; font-weight: bold;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const navItems = document.querySelectorAll('.nav-item[data-target]');
+            const contentSections = document.querySelectorAll('.content-section');
+            const pageTitle = document.getElementById('pageTitle');
+            const refreshButton = document.getElementById('refreshButton');
+
+            let currentActiveSection = 'pedidos-pendientes';
+
+            function showSection(targetId) {
+                contentSections.forEach(section => {
+                    section.classList.add('hidden');
+                });
+                document.getElementById(targetId).classList.remove('hidden');
+                pageTitle.textContent = document.querySelector(`.nav-item[data-target="${targetId}"]`).textContent;
+                currentActiveSection = targetId;
+                loadContentForSection(targetId);
+            }
+
+            navItems.forEach(item => {
+                item.addEventListener('click', function() {
+                    navItems.forEach(nav => nav.classList.remove('active'));
+                    this.classList.add('active');
+                    showSection(this.dataset.target);
+                });
+            });
+
+            refreshButton.addEventListener('click', function() {
+                loadContentForSection(currentActiveSection);
+            });
+
+            // Initial load
+            showSection('pedidos-pendientes');
+
+            // Dark Mode Toggle
+            const toggleDarkModeBtn = document.getElementById('toggleDarkMode');
+            toggleDarkModeBtn.addEventListener('click', () => {
+                document.body.classList.toggle('dark-mode');
+                // You might want to save this preference in localStorage
+            });
+
+            // Drag and Drop for Clients CSV
+            const uploadAreaClientes = document.getElementById('uploadAreaClientes');
+            const fileInputClientes = document.getElementById('fileInputClientes');
+            const uploadStatusClientes = document.getElementById('uploadStatusClientes');
+
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                uploadAreaClientes.addEventListener(eventName, preventDefaults, false);
+            });
+
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                uploadAreaClientes.addEventListener(eventName, () => uploadAreaClientes.classList.add('dragover'), false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                uploadAreaClientes.addEventListener(eventName, () => uploadAreaClientes.classList.remove('dragover'), false);
+            });
+
+            uploadAreaClientes.addEventListener('drop', handleDropClientes, false);
+            fileInputClientes.addEventListener('change', (e) => handleFilesClientes(e.target.files));
+
+            function handleDropClientes(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                handleFilesClientes(files);
+            }
+
+            async function handleFilesClientes(files) {
+                if (files.length === 0) return;
+                const file = files;
+                if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
+                    uploadStatusClientes.style.color = 'red';
+                    uploadStatusClientes.textContent = '❌ Por favor, selecciona un archivo CSV.';
+                    return;
+                }
+
+                uploadStatusClientes.style.color = 'orange';
+                uploadStatusClientes.textContent = '📤 Subiendo archivo...';
+
+                const formData = new FormData();
+                formData.append('csvFile', file);
+
+                try {
+                    const response = await fetch('/api/upload-clientes-csv', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                        uploadStatusClientes.style.color = 'green';
+                        uploadStatusClientes.textContent = `✅ Clientes cargados: ${result.insertados} insertados, ${result.errores} errores.`;
+                    } else {
+                        uploadStatusClientes.style.color = 'red';
+                        uploadStatusClientes.textContent = `❌ Error al cargar clientes: ${result.error || 'Error desconocido'}`;
+                    }
+                } catch (error) {
+                    console.error('Error uploading clients CSV:', error);
+                    uploadStatusClientes.style.color = 'red';
+                    uploadStatusClientes.textContent = `❌ Error de conexión al subir clientes: ${error.message}`;
+                }
+            }
+
+            // Drag and Drop for Products CSV (similar to clients)
+            const uploadAreaProductos = document.getElementById('uploadAreaProductos');
+            const fileInputProductos = document.getElementById('fileInputProductos');
+            const uploadStatusProductos = document.getElementById('uploadStatusProductos');
+
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                uploadAreaProductos.addEventListener(eventName, preventDefaults, false);
+            });
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                uploadAreaProductos.addEventListener(eventName, () => uploadAreaProductos.classList.add('dragover'), false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                uploadAreaProductos.addEventListener(eventName, () => uploadAreaProductos.classList.remove('dragover'), false);
+            });
+
+            uploadAreaProductos.addEventListener('drop', handleDropProductos, false);
+            fileInputProductos.addEventListener('change', (e) => handleFilesProductos(e.target.files));
+
+            function handleDropProductos(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                handleFilesProductos(files);
+            }
+
+            async function handleFilesProductos(files) {
+                if (files.length === 0) return;
+                const file = files;
+                if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
+                    uploadStatusProductos.style.color = 'red';
+                    uploadStatusProductos.textContent = '❌ Por favor, selecciona un archivo CSV.';
+                    return;
+                }
+
+                uploadStatusProductos.style.color = 'orange';
+                uploadStatusProductos.textContent = '📤 Subiendo archivo...';
+
+                const formData = new FormData();
+                formData.append('csvFile', file);
+
+                try {
+                    const response = await fetch('/api/upload-productos-csv', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                        uploadStatusProductos.style.color = 'green';
+                        uploadStatusProductos.textContent = `✅ Productos cargados: ${result.insertados} insertados, ${result.errores} errores.`;
+                    } else {
+                        uploadStatusProductos.style.color = 'red';
+                        uploadStatusProductos.textContent = `❌ Error al cargar productos: ${result.error || 'Error desconocido'}`;
+                    }
+                } catch (error) {
+                    console.error('Error uploading products CSV:', error);
+                    uploadStatusProductos.style.color = 'red';
+                    uploadStatusProductos.textContent = `❌ Error de conexión al subir productos: ${error.message}`;
+                }
+            }
+
+
+            async function loadContentForSection(sectionId) {
+                const tableContainer = document.getElementById(`${sectionId}Table`);
+                if (!tableContainer) return;
+
+                tableContainer.innerHTML = `<div class="loading">🔄 Cargando ${sectionId.replace(/-/g, ' ')}...</div>`;
+
+                try {
+                    const response = await fetch('/api/pedidos-completos');
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    const data = await response.json();
+
+                    if (data.success && Array.isArray(data.pedidos)) {
+                        let filteredPedidos = [];
+                        if (sectionId === 'pedidos-pendientes') {
+                            filteredPedidos = data.pedidos.filter(p => p.estado === 'PENDIENTE');
+                        } else if (sectionId === 'pedidos-confirmados') {
+                            filteredPedidos = data.pedidos.filter(p => p.estado === 'CONFIRMADO');
+                        } else { // todos-los-pedidos
+                            filteredPedidos = data.pedidos;
+                        }
+                        displayPedidosTable(filteredPedidos, tableContainer, sectionId);
+                    } else {
+                        throw new Error(data.message || 'No se pudieron cargar los datos de pedidos.');
+                    }
+                } catch (error) {
+                    console.error(`Error loading ${sectionId}:`, error);
+                    tableContainer.innerHTML = `
+                        <div class="error">
+                            <h3>❌ Error al cargar ${sectionId.replace(/-/g, ' ')}</h3>
+                            <p>${error.message}</p>
+                            <button class="btn" onclick="loadContentForSection('${sectionId}')">🔄 Reintentar</button>
+                        </div>
+                    `;
+                }
+            }
+
+            function displayPedidosTable(pedidos, container, sectionId) {
+                if (pedidos.length === 0) {
+                    container.innerHTML = `<div class="loading">📭 No hay ${sectionId.replace(/-/g, ' ')}</div>`;
+                    return;
+                }
+
+                const tableHtml = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID Pedido</th>
+                                <th>Fecha/Hora</th>
+                                <th>Cliente</th>
+                                <th>Items</th>
+                                <th>Total</th>
+                                <th>Estado</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${pedidos.map(pedido => `
+                                <tr>
+                                    <td>${pedido.pedido_id || '-'}</td>
+                                    <td>${new Date(pedido.fecha_hora).toLocaleString() || '-'}</td>
+                                    <td>${pedido.cliente_nombre || '-'}</td>
+                                    <td class="cantidad">${pedido.items_cantidad || 0}</td>
+                                    <td class="precio">$${(pedido.total || 0).toLocaleString('es-AR')}</td>
+                                    <td><span class="estado ${pedido.estado ? pedido.estado.toLowerCase() : ''}">${pedido.estado || '-'}</span></td>
+                                    <td>
+                                        ${pedido.estado === 'PENDIENTE' ? `
+                                            <button class="btn btn-success btn-sm" onclick="updatePedidoStatus('${pedido.pedido_id}', 'CONFIRMADO', '${sectionId}')">Confirmar</button>
+                                            <button class="btn btn-danger btn-sm" onclick="updatePedidoStatus('${pedido.pedido_id}', 'CANCELADO', '${sectionId}')">Cancelar</button>
+                                        ` : ''}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                container.innerHTML = tableHtml;
+            }
+
+            async function updatePedidoStatus(pedidoId, newStatus, sectionId) {
+                if (!confirm(`¿Estás seguro de que quieres ${newStatus === 'CONFIRMADO' ? 'confirmar' : 'cancelar'} el pedido ${pedidoId}?`)) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`/api/pedidos/${pedidoId}/estado`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ estado: newStatus })
+                    });
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                        alert(`Pedido ${pedidoId} actualizado a ${newStatus} exitosamente.`);
+                        loadContentForSection(sectionId); // Recargar la sección actual
+                        // También recargar otras secciones si es necesario
+                        if (sectionId !== 'pedidos-pendientes') loadContentForSection('pedidos-pendientes');
+                        if (sectionId !== 'pedidos-confirmados') loadContentForSection('pedidos-confirmados');
+                        if (sectionId !== 'todos-los-pedidos') loadContentForSection('todos-los-pedidos');
+                    } else {
+                        alert(`Error al actualizar el pedido: ${result.error || 'Error desconocido'}`);
+                    }
+                } catch (error) {
+                    console.error('Error updating pedido status:', error);
+                    alert(`Error de conexión al actualizar el estado del pedido: ${error.message}`);
+                }
+            }
+
+            // Add dark mode styles
+            const style = document.createElement('style');
+            style.textContent = `
+                body.dark-mode {
+                    background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%);
+                    color: #ecf0f1;
+                }
+                body.dark-mode .sidebar {
+                    background: rgba(23, 32, 42, 0.95);
+                }
+                body.dark-mode .sidebar h2 {
+                    color: #ecf0f1;
+                }
+                body.dark-mode .nav-item {
+                    background: rgba(30, 40, 50, 0.7);
+                    color: #ecf0f1;
+                }
+                body.dark-mode .nav-item:hover {
+                    background: rgba(52, 152, 219, 0.8);
+                }
+                body.dark-mode .nav-item.active {
+                    background: #3498db;
+                }
+                body.dark-mode .main-content .header,
+                body.dark-mode .content-section {
+                    background: #2c3e50;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+                }
+                body.dark-mode .header h1 {
+                    color: #ecf0f1;
+                }
+                body.dark-mode .section-header {
+                    background: #1a252f;
+                    color: #ecf0f1;
+                }
+                body.dark-mode th {
+                    background: #1a252f;
+                    color: #ecf0f1;
+                }
+                body.dark-mode td {
+                    border-bottom: 1px solid #34495e;
+                }
+                body.dark-mode tr:hover {
+                    background-color: #34495e;
+                }
+                body.dark-mode .loading,
+                body.dark-mode .cantidad {
+                    color: #bdc3c7;
+                }
+                body.dark-mode .precio {
+                    color: #2ecc71;
+                }
+                body.dark-mode .error {
+                    background: #721c24;
+                    color: #f8d7da;
+                }
+                body.dark-mode .upload-area {
+                    border-color: #34495e;
+                }
+                body.dark-mode .upload-area:hover {
+                    border-color: #3498db;
+                    background: #34495e;
+                }
+                body.dark-mode .upload-area.dragover {
+                    border-color: #27ae60;
+                    background: #2ecc71;
+                }
+            `;
+            document.head.appendChild(style);
         });
-        return obj;
-      })
-      .filter(obj => {
-        if (nombreHoja === 'Clientes') {
-          return obj.cliente_id && obj.nombre && obj.nombre !== '';
-        }
-        if (nombreHoja === 'Categorias') {
-          return obj.categoria_id && obj.categoria_nombre && obj.categoria_nombre !== '';
-        }
-        if (nombreHoja === 'Productos') {
-          return obj.producto_id && obj.producto_nombre && obj.producto_nombre !== '';
-        }
-        return Object.values(obj).some(val => val && val !== '');
-      });
-
-    console.log(`✅ ${nombreHoja}: ${data.length} registros válidos`);
-    return data;
-  } catch (error) {
-    console.error(`❌ Error ${nombreHoja}:`, error.message);
-    return datosEjemplo[nombreHoja.toLowerCase()] || [];
-  }
-}
-
-// Función para agregar datos a Google Sheets
-async function agregarDatosSheet(nombreHoja, datos) {
-  try {
-    if (!SPREADSHEET_ID) {
-      console.log(`⚠️ Google Sheets no configurado, simulando inserción en ${nombreHoja}`);
-      return true;
-    }
-
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${nombreHoja}!A:Z`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: {
-        values: [datos]
-      }
-    });
-
-    return true;
-  } catch (error) {
-    console.error(`❌ Error agregando datos a ${nombreHoja}:`, error.message);
-    return false;
-  }
-}
-
-// Función para generar ID de pedido
-async function generarPedidoId() {
-  try {
-    if (!SPREADSHEET_ID) {
-      return `PD${String(Date.now()).slice(-6).padStart(6, '0')}`;
-    }
-
-    const pedidos = await obtenerDatosSheet('Pedidos');
-    
-    let ultimoNumero = 0;
-    pedidos.forEach(pedido => {
-      if (pedido.pedido_id && pedido.pedido_id.startsWith('PD')) {
-        const numero = parseInt(pedido.pedido_id.replace('PD', ''));
-        if (numero > ultimoNumero) {
-          ultimoNumero = numero;
-        }
-      }
-    });
-    
-    const nuevoNumero = ultimoNumero + 1;
-    return `PD${String(nuevoNumero).padStart(6, '0')}`;
-    
-  } catch (error) {
-    console.error('❌ Error generando ID:', error);
-    return `PD${String(Date.now()).slice(-6).padStart(6, '0')}`;
-  }
-}
-
-// Comandos del bot
-bot.on('callback_query', async (ctx) => {
-  const userId = ctx.from.id;
-  const callbackData = ctx.callbackQuery.data;
-  
-  try {
-    await ctx.answerCbQuery();
-    
-    if (callbackData === 'hacer_pedido') {
-      const clientes = await obtenerDatosSheet('Clientes');
-      
-      if (clientes.length === 0) {
-        await ctx.reply('❌ No hay clientes disponibles');
-        return;
-      }
-      
-      setUserState(userId, { step: 'seleccionar_cliente' });
-      
-      const keyboard = clientes.map(cliente => [{
-        text: `👤 ${cliente.nombre}`,
-        callback_data: `cliente_${cliente.cliente_id}`
-      }]);
-      
-      await ctx.reply('👤 Selecciona el cliente:', {
-        reply_markup: { inline_keyboard: keyboard }
-      });
-      
-    } else if (callbackData.startsWith('cliente_')) {
-      const clienteId = parseInt(callbackData.split('_')[1]);
-      
-      const clientes = await obtenerDatosSheet('Clientes');
-      const cliente = clientes.find(c => c.cliente_id == clienteId);
-      
-      if (!cliente) {
-        await ctx.reply('❌ Cliente no encontrado');
-        return;
-      }
-      
-      setUserState(userId, { 
-        step: 'seleccionar_categoria', 
-        cliente: cliente,
-        pedido_id: await generarPedidoId()
-      });
-      
-      const categorias = await obtenerDatosSheet('Categorias');
-      
-      const keyboard = categorias.map(cat => [{
-        text: `📂 ${cat.categoria_nombre}`,
-        callback_data: `categoria_${cat.categoria_id}`
-      }]);
-      
-      await ctx.editMessageText(`✅ Cliente: ${cliente.nombre}\n\n📂 Selecciona una categoría:`, {
-        reply_markup: { inline_keyboard: keyboard }
-      });
-    }
-    
-  } catch (error) {
-    console.error('❌ Error en callback:', error);
-    await ctx.reply('❌ Ocurrió un error. Intenta nuevamente.');
-  }
-});
-
-// Configurar webhook
-app.post('/webhook', (req, res) => {
-  try {
-    bot.handleUpdate(req.body);
-    res.status(200).send('OK');
-  } catch (error) {
-    console.error('❌ Error en webhook:', error);
-    res.status(500).send('Error');
-  }
-});
-
-// API Routes
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    port: PORT
-  });
-});
-
-app.get('/api/info', (req, res) => {
-  res.json({
-    name: 'Sistema Distribuidora Bot',
-    version: '1.0.0',
-    status: 'running',
-    features: [
-      'Bot de Telegram',
-      'Integración Google Sheets',
-      'Sistema de pedidos'
-    ]
-  });
-});
-
-app.get('/api/clientes', async (req, res) => {
-  try {
-    const clientes = await obtenerDatosSheet('Clientes');
-    res.json({ success: true, clientes });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.get('/api/productos', async (req, res) => {
-  try {
-    const productos = await obtenerDatosSheet('Productos');
-    res.json({ success: true, productos });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.get('/api/detalles-pedidos', async (req, res) => {
-  try {
-    const detalles = await obtenerDatosSheet('DetallePedidos');
-    res.json({ success: true, detalles });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Iniciar servidor
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor iniciado en puerto ${PORT}`);
-  console.log(`🌐 Dashboard: http://localhost:${PORT}`);
-  console.log(`🤖 Bot de Telegram configurado`);
-  console.log(`📊 Google Sheets: ${SPREADSHEET_ID ? 'Configurado' : 'No configurado'}`);
-});
-
-// Manejo de errores
-process.on('uncaughtException', (error) => {
-  console.error('❌ Error no capturado:', error);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Promesa rechazada no manejada:', reason);
-});
+    </script>
+</body>
+</html>
