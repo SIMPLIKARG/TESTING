@@ -434,6 +434,12 @@ function buscarProductos(productos, termino, categoriaId = null) {
 // Función para mostrar productos paginados
 async function mostrarProductosPaginados(ctx, productos, categoriaId, nombreCategoria, paginaActual = 1, esResultadoBusqueda = false, terminoBusqueda = '') {
   const PRODUCTOS_POR_PAGINA = 8;
+    // Validar que productos sea un array
+    if (!Array.isArray(productos)) {
+      console.log('⚠️ [mostrarProductosPaginados] productos no es array:', typeof productos);
+      productos = [];
+    }
+    
   const totalProductos = productos.length;
   const totalPaginas = Math.ceil(totalProductos / PRODUCTOS_POR_PAGINA);
   
@@ -892,7 +898,11 @@ bot.on('callback_query', async (ctx) => {
       console.log(`📂 Categoría: ${categoriaId}`);
       
       const productos = await obtenerDatosSheet('Productos');
-      const productosCategoria = productos.filter(p => p.categoria_id == categoriaId && p.activo === 'SI');
+      console.log(`📦 [Callback] Productos obtenidos:`, typeof productos, Array.isArray(productos) ? productos.length : 'no es array');
+      
+      // Asegurar que productos sea un array
+      const productosArray = Array.isArray(productos) ? productos : [];
+      const productosCategoria = productosArray.filter(p => p.categoria_id == categoriaId && p.activo === 'SI');
       
       if (productosCategoria.length === 0) {
         await ctx.reply('❌ No hay productos disponibles en esta categoría');
@@ -1541,6 +1551,8 @@ bot.on('text', async (ctx) => {
       }
       
       const productos = await obtenerDatosSheet('Productos');
+      console.log(`📦 [Text] Productos para búsqueda:`, typeof productos, Array.isArray(productos) ? productos.length : 'no es array');
+      
       const categoriaId = userState.categoria_busqueda;
       const tipo = userState.busqueda_tipo || 'all';
       
