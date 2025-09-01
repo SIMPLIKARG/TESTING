@@ -948,6 +948,303 @@ app.get('/api/detalles-pedidos', async (req, res) => {
   }
 });
 
+// Endpoint para obtener pedidos completos
+app.get('/api/pedidos-completos', async (req, res) => {
+  try {
+    console.log('📊 Obteniendo pedidos completos...');
+    
+    // Obtener datos de ambas hojas
+    const pedidos = await obtenerDatosSheet('Pedidos');
+    const detalles = await obtenerDatosSheet('DetallePedidos');
+    
+    console.log(`📋 Pedidos: ${pedidos.length}, Detalles: ${detalles.length}`);
+    
+    // Combinar pedidos con sus detalles
+    const pedidosCompletos = pedidos.map(pedido => {
+      const pedidoId = pedido.pedido_id;
+      
+      // Encontrar todos los detalles de este pedido
+      const detallesPedido = detalles.filter(detalle => 
+        detalle.pedido_id === pedidoId
+      );
+      
+      // Calcular total desde los detalles si no existe o es incorrecto
+      const totalCalculado = detallesPedido.reduce((sum, detalle) => {
+        const importe = parseFloat(detalle.importe) || 0;
+        return sum + importe;
+      }, 0);
+      
+      // Usar el total calculado si el total del pedido no existe o es 0
+      const totalFinal = parseFloat(pedido.total) || totalCalculado;
+      
+      return {
+        ...pedido,
+        total: totalFinal,
+        total_calculado: totalCalculado,
+        detalles: detallesPedido,
+        cantidad_items: detallesPedido.length
+      };
+    });
+    
+    // Ordenar por fecha más reciente primero
+    pedidosCompletos.sort((a, b) => {
+      const fechaA = new Date(a.fecha_hora || 0);
+      const fechaB = new Date(b.fecha_hora || 0);
+      return fechaB - fechaA;
+    });
+    
+    console.log(`✅ ${pedidosCompletos.length} pedidos completos procesados`);
+    
+    res.json({ 
+      success: true, 
+      pedidos: pedidosCompletos,
+      total_pedidos: pedidosCompletos.length,
+      total_detalles: detalles.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Error obteniendo pedidos completos:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Endpoint para obtener métricas
+app.get('/api/metricas', async (req, res) => {
+  try {
+    console.log('📊 Calculando métricas...');
+    
+    // Obtener datos necesarios
+    const productos = await obtenerDatosSheet('Productos');
+    const categorias = await obtenerDatosSheet('Categorias');
+    const detalles = await obtenerDatosSheet('DetallePedidos');
+    
+    console.log(`📊 Datos obtenidos: ${productos.length} productos, ${categorias.length} categorías, ${detalles.length} detalles`);
+    
+    // Calcular métricas por producto
+    const metricas = productos.map(producto => {
+      // Encontrar categoría
+      const categoria = categorias.find(c => c.categoria_id == producto.categoria_id);
+      
+      // Calcular ventas de este producto
+      const ventasProducto = detalles.filter(d => d.producto_id == producto.producto_id);
+      
+      const cantidadVendida = ventasProducto.reduce((sum, venta) => {
+        return sum + (parseInt(venta.cantidad) || 0);
+      }, 0);
+      
+      const ingresosTotales = ventasProducto.reduce((sum, venta) => {
+        return sum + (parseFloat(venta.importe) || 0);
+      }, 0);
+      
+      // Estimar costos (70% del precio de venta)
+      const precioPromedio = parseFloat(producto.precio1) || 0;
+      const costoEstimado = precioPromedio * 0.7;
+      const costoTotal = costoEstimado * cantidadVendida;
+      const gananciaTotal = ingresosTotales - costoTotal;
+      const rentabilidad = ingresosTotales > 0 ? (gananciaTotal / ingresosTotales) * 100 : 0;
+      
+      return {
+        producto_id: producto.producto_id,
+        producto_nombre: producto.producto_nombre,
+        categoria_id: producto.categoria_id,
+        categoria_nombre: categoria ? categoria.categoria_nombre : 'Sin categoría',
+        proveedor_id: producto.proveedor_id || '',
+        proveedor_nombre: producto.proveedor_nombre || '',
+        cantidad_vendida: cantidadVendida,
+        ingresos_totales: Math.round(ingresosTotales),
+        costo_total_estimado: Math.round(costoTotal),
+        ganancia_total_estimada: Math.round(gananciaTotal),
+        rentabilidad_porcentual: Math.round(rentabilidad * 100) / 100
+      };
+    });
+    
+    // Ordenar por ingresos totales (descendente)
+    metricas.sort((a, b) => b.ingresos_totales - a.ingresos_totales);
+    
+    console.log(`✅ Métricas calculadas para ${metricas.length} productos`);
+    
+    res.json({ 
+      success: true, 
+      metricas,
+      resumen: {
+        total_productos: productos.length,
+        productos_vendidos: metricas.filter(m => m.cantidad_vendida > 0).length,
+        ingresos_totales: metricas.reduce((sum, m) => sum + m.ingresos_totales, 0),
+        ganancia_total: metricas.reduce((sum, m) => sum + m.ganancia_total_estimada, 0)
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error calculando métricas:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Endpoint para actualizar hoja de métricas
+app.post('/api/actualizar-metricas', async (req, res) => {
+  try {
+    console.log('🔄 Actualizando hoja de métricas...');
+    
+    if (!SPREADSHEET_ID) {
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Google Sheets no configurado' 
+      });
+    }
+    
+    // Obtener métricas calculadas
+    const metricsResponse = await fetch(`${req.protocol}://${req.get('host')}/api/metricas`);
+    const metricsData = await metricsResponse.json();
+    
+    if (!metricsData.success) {
+      throw new Error('Error obteniendo métricas');
+    }
+    
+    const metricas = metricsData.metricas;
+    
+    // Preparar datos para la hoja de métricas
+    const headers = [
+      'producto_id',
+      'producto_nombre', 
+      'categoria_id',
+      'categoria_nombre',
+      'proveedor_id',
+      'proveedor_nombre',
+      'cantidad_vendida',
+      'ingresos_totales',
+      'costo_total_estimado',
+      'ganancia_total_estimada',
+      'rentabilidad_porcentual'
+    ];
+    
+    const datosParaSheet = [headers];
+    
+    for (const metrica of metricas) {
+      const fila = [
+        metrica.producto_id,
+        metrica.producto_nombre,
+        metrica.categoria_id,
+        metrica.categoria_nombre,
+        metrica.proveedor_id,
+        metrica.proveedor_nombre,
+        metrica.cantidad_vendida,
+        metrica.ingresos_totales,
+        metrica.costo_total_estimado,
+        metrica.ganancia_total_estimada,
+        metrica.rentabilidad_porcentual
+      ];
+      datosParaSheet.push(fila);
+    }
+    
+    // Actualizar hoja de métricas
+    await reemplazarDatosSheet('Metricas', datosParaSheet);
+    
+    console.log(`✅ Hoja de métricas actualizada con ${metricas.length} productos`);
+    
+    res.json({ 
+      success: true, 
+      message: 'Hoja de métricas actualizada exitosamente',
+      productos_actualizados: metricas.length,
+      resumen: metricsData.resumen
+    });
+    
+  } catch (error) {
+    console.error('❌ Error actualizando métricas:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Endpoint para configurar webhook automáticamente
+app.post('/api/setup-webhook', async (req, res) => {
+  try {
+    console.log('🔧 Configurando webhook automáticamente...');
+    
+    const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+    const baseUrl = process.env.RAILWAY_STATIC_URL || `${req.protocol}://${req.get('host')}`;
+    
+    if (!TELEGRAM_BOT_TOKEN) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'TELEGRAM_BOT_TOKEN no configurado' 
+      });
+    }
+    
+    const webhookUrl = `${baseUrl}/webhook`;
+    const apiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
+    
+    console.log(`🔗 Configurando webhook: ${webhookUrl}`);
+    
+    const response = await fetch(`${apiUrl}/setWebhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: webhookUrl,
+        allowed_updates: ["message", "callback_query"],
+        drop_pending_updates: true
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (result.ok) {
+      console.log('✅ Webhook configurado exitosamente');
+      res.json({ 
+        success: true, 
+        message: 'Webhook configurado exitosamente',
+        webhook_url: webhookUrl
+      });
+    } else {
+      throw new Error(result.description);
+    }
+    
+  } catch (error) {
+    console.error('❌ Error configurando webhook:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Endpoint para test de Google Sheets
+app.get('/api/test/sheets', async (req, res) => {
+  try {
+    console.log('🧪 Probando conexión a Google Sheets...');
+    
+    if (!SPREADSHEET_ID) {
+      return res.status(500).json({ 
+        success: false, 
+        error: 'GOOGLE_SHEETS_ID no configurado' 
+      });
+    }
+    
+    // Probar obtener información básica del spreadsheet
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    const hojas = spreadsheet.data.sheets?.map(sheet => ({
+      nombre: sheet.properties?.title,
+      id: sheet.properties?.sheetId
+    })) || [];
+    
+    console.log('✅ Conexión a Google Sheets exitosa');
+    
+    res.json({ 
+      success: true, 
+      message: 'Conexión a Google Sheets exitosa',
+      spreadsheet_title: spreadsheet.data.properties?.title,
+      hojas: hojas,
+      spreadsheet_id: SPREADSHEET_ID
+    });
+    
+  } catch (error) {
+    console.error('❌ Error probando Google Sheets:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      details: 'Verifica las credenciales de Google Cloud y que la hoja esté compartida'
+    });
+  }
+});
+
 // Endpoint para cargar clientes desde XLSX
 app.post('/api/upload-clientes-xlsx', upload.single('file'), async (req, res) => {
   try {
