@@ -335,44 +335,6 @@ async function mostrarProductosPaginados(ctx, productos, pagina = 1, titulo = 'P
   }
 }
 
-// Función para buscar productos
-function buscarProductos(productos, termino, categoriaId = null) {
-  console.log(`🔍 [buscarProductos] Buscando "${termino}" en ${productos.length} productos`);
-  
-  if (!Array.isArray(productos)) {
-    console.log(`⚠️ [buscarProductos] productos no es array: ${typeof productos}`);
-    return [];
-  }
-  
-  const terminoLower = termino.toLowerCase().trim();
-  
-  const resultados = productos.filter(producto => {
-    // Verificar que el producto tenga los campos necesarios
-    if (!producto.producto_nombre) return false;
-    
-    const nombre = producto.producto_nombre.toLowerCase();
-    const id = producto.producto_id?.toString() || '';
-    const activo = producto.activo === 'SI';
-    const enCategoria = !categoriaId || producto.categoria_id == categoriaId;
-    
-    const coincideNombre = nombre.includes(terminoLower);
-    const coincideId = id.includes(terminoLower);
-    
-    return (coincideNombre || coincideId) && activo && enCategoria;
-  });
-  
-  console.log(`✅ [buscarProductos] ${resultados.length} productos encontrados`);
-  return resultados;
-}
-
-// Función para exportar carrito a archivo TXT
-function exportarCarrito(cliente, cart, pedidoId) {
-  try {
-    const fecha = new Date().toLocaleString('es-AR');
-    const total = cart.reduce((sum, item) => sum + item.importe, 0);
-    const totalItems = cart.reduce((sum, item) => sum + item.cantidad, 0);
-    
-    let contenido = `📋 PEDIDO - ${pedidoId}\n`;
     contenido += `═══════════════════════════════════════\n\n`;
     contenido += `👤 CLIENTE: ${cliente.nombre}\n`;
     contenido += `📅 FECHA: ${fecha}\n`;
@@ -1829,9 +1791,13 @@ bot.on('text', async (ctx) => {
         return;
       }
       
-      if (cantidad > 999) {
-        await ctx.reply('❌ Cantidad máxima: 999 unidades');
-        return;
+      const productoId = userState.producto_id;
+      await agregarAlCarrito(ctx, userId, productoId, cantidad);
+      
+      // Limpiar estado de cantidad custom
+      setUserState(userId, { 
+        ...userState, 
+        step: 'seleccionar_categoria',
         producto_id: null,
         pagina_origen: null
       });
@@ -1900,6 +1866,11 @@ bot.on('text', async (ctx) => {
         await ctx.reply(`❌ No se encontraron productos con "${text}" ${scope}`, {
           reply_markup: {
             inline_keyboard: [
+            ]
+          }
+        }
+        )
+      }
       // Mostrar resultados paginados
       await mostrarProductosPaginados(ctx, resultados, 1, 'Resultados de búsqueda', categoriaId, true, termino);
       
@@ -1909,11 +1880,35 @@ bot.on('text', async (ctx) => {
         step: 'seleccionar_categoria' 
       });
     } else if (userState.step === 'escribir_observacion') {
-      const productoId = userState.producto_id;
-      await agregarProductoAlCarrito(ctx, userId, productoId, cantidad);
+      const observacion = text.trim();
       
-      // Limpiar estado
-      setUserState(userId, { ...userState, step: 'seleccionar_categoria' });
+      if (observacion.length === 0) {
+        await ctx.reply('❌ Por favor escribe una observación válida o usa /start para cancelar');
+        return;
+      }
+      
+      if (observacion.length > 500) {
+        await ctx.reply('❌ La observación es muy larga. Máximo 500 caracteres.');
+        return;
+      }
+      
+      console.log(`📝 Observación de ${userName}: "${observacion}"`);
+      
+      // Confirmar pedido con observación
+      await confirmarPedido(ctx, userId, observacion);
+      
+    } else {
+      // Mensaje no reconocido
+      await ctx.reply(
+        '❓ No entiendo ese mensaje. Usa /start para comenzar o los botones del menú.',
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🏠 Menú principal', callback_data: 'start' }]
+            ]
+          }
+        }
+      );
     }
     
   } catch (error) {
