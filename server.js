@@ -135,12 +135,19 @@ async function obtenerDatosSheet(nombreHoja) {
       .map(row => {
         const obj = {};
         headers.forEach((header, index) => {
+    console.log('🔍 Parseando CSV...');
+    
           obj[header] = row[index] ? row[index].toString().trim() : '';
+    console.log(`📄 Líneas encontradas: ${lines.length}`);
+    
         });
+      console.log('❌ CSV debe tener al menos encabezados y una fila de datos');
         return obj;
       })
       .filter(obj => {
         // Filtrar objetos con datos válidos según la hoja
+    console.log('📋 Encabezados:', headers);
+    
         if (nombreHoja === 'Clientes') {
           return obj.cliente_id && obj.nombre && obj.nombre !== '';
         }
@@ -148,6 +155,12 @@ async function obtenerDatosSheet(nombreHoja) {
           return obj.categoria_id && obj.categoria_nombre && obj.categoria_nombre !== '';
         }
         if (nombreHoja === 'Productos') {
+      
+      if (values.length !== headers.length) {
+        console.log(`⚠️ Línea ${i + 1} tiene ${values.length} valores, esperaba ${headers.length}`);
+        continue;
+      }
+      
           return obj.producto_id && obj.producto_nombre && obj.producto_nombre !== '';
         }
         if (nombreHoja === 'Pedidos' || nombreHoja === 'DetallePedidos') {
@@ -157,6 +170,7 @@ async function obtenerDatosSheet(nombreHoja) {
       });
 
     console.log(`✅ ${nombreHoja}: ${data.length} registros válidos`);
+    console.log(`✅ ${data.length} registros parseados correctamente`);
     return data;
   } catch (error) {
     console.error(`❌ Error ${nombreHoja}:`, error.message);
@@ -293,7 +307,7 @@ async function calcularMetricas() {
     return metricas;
     
   } catch (error) {
-    console.error('❌ Error calculando métricas:', error);
+    console.error('❌ Error parseando CSV:', error.message);
     return [];
   }
 }
