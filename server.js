@@ -17,8 +17,10 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Middleware básico (SIN express.json global para evitar conflictos con multer)
+// Middleware básico
 app.use(cors());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static('public'));
 
 // Configuración de multer para archivos XLSX
@@ -154,26 +156,41 @@ function parseXLSX(buffer, expectedHeaders) {
 // Función para obtener datos de Google Sheets
 async function obtenerDatosSheet(nombreHoja) {
   try {
+    console.log(`📊 [obtenerDatosSheet] Iniciando obtención de ${nombreHoja}...`);
+    
     if (!SPREADSHEET_ID) {
+      console.log(`❌ [obtenerDatosSheet] GOOGLE_SHEETS_ID no configurado`);
       throw new Error('Google Sheets no configurado. Configura GOOGLE_SHEETS_ID en las variables de entorno.');
     }
+    
+    if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL) {
+      console.log(`❌ [obtenerDatosSheet] GOOGLE_SERVICE_ACCOUNT_EMAIL no configurado`);
+      throw new Error('GOOGLE_SERVICE_ACCOUNT_EMAIL no configurado');
+    }
+    
+    if (!process.env.GOOGLE_PRIVATE_KEY) {
+      console.log(`❌ [obtenerDatosSheet] GOOGLE_PRIVATE_KEY no configurado`);
+      throw new Error('GOOGLE_PRIVATE_KEY no configurado');
+    }
 
-    console.log(`📊 Obteniendo ${nombreHoja} desde Google Sheets...`);
+    console.log(`📊 [obtenerDatosSheet] Obteniendo datos de hoja: ${nombreHoja}`);
+    console.log(`📊 [obtenerDatosSheet] Spreadsheet ID: ${SPREADSHEET_ID}`);
+    
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${nombreHoja}!A:Z`,
     });
 
     const rows = response.data.values || [];
-    console.log(`📋 ${nombreHoja}: ${rows.length} filas obtenidas`);
+    console.log(`📋 [obtenerDatosSheet] ${nombreHoja}: ${rows.length} filas obtenidas`);
     
     if (rows.length === 0) {
-      console.log(`⚠️ ${nombreHoja} está vacía`);
+      console.log(`⚠️ [obtenerDatosSheet] ${nombreHoja} está vacía`);
       return [];
     }
 
     const headers = rows[0];
-    console.log(`📋 Encabezados de ${nombreHoja}:`, headers);
+    console.log(`📋 [obtenerDatosSheet] Encabezados de ${nombreHoja}:`, headers);
     
     // Filtrar filas vacías y mapear datos
     const data = rows.slice(1)
@@ -196,14 +213,34 @@ async function obtenerDatosSheet(nombreHoja) {
         if (nombreHoja === 'Productos') {
           return obj.producto_id && obj.producto_nombre && obj.producto_nombre !== '';
         }
+        if (nombreHoja === 'DetallePedidos') {
+          return obj.detalle_id && obj.pedido_id && obj.producto_id;
+        }
+        if (nombreHoja === 'Pedidos') {
+          return obj.pedido_id && obj.cliente_id;
+        }
         return Object.values(obj).some(val => val && val !== '');
       });
 
-    console.log(`✅ ${nombreHoja}: ${data.length} registros válidos procesados`);
+    console.log(`✅ [obtenerDatosSheet] ${nombreHoja}: ${data.length} registros válidos procesados`);
     return data;
+    
   } catch (error) {
-    console.error(`❌ Error obteniendo ${nombreHoja}:`, error.message);
-    throw error; // Re-lanzar el error para que el endpoint pueda manejarlo
+    console.error(`❌ [obtenerDatosSheet] Error obteniendo ${nombreHoja}:`, error.message);
+    console.error(`❌ [obtenerDatosSheet] Stack completo:`, error.stack);
+    
+    // Información adicional para debugging
+    if (error.message.includes('Unable to parse range')) {
+      console.error(`❌ [obtenerDatosSheet] Problema con el rango. Verifica que la hoja "${nombreHoja}" exista`);
+    }
+    if (error.message.includes('The caller does not have permission')) {
+      console.error(`❌ [obtenerDatosSheet] Problema de permisos. Verifica que la hoja esté compartida con: ${process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL}`);
+    }
+    if (error.message.includes('Requested entity was not found')) {
+      console.error(`❌ [obtenerDatosSheet] Hoja no encontrada. Verifica el SPREADSHEET_ID: ${SPREADSHEET_ID}`);
+    }
+    
+    throw error; // Re-lanzar el error para que el endpoint devuelva 500
   }
 }
 
@@ -866,10 +903,25 @@ async function confirmarPedido(ctx, userId, observacion = '') {
 app.post('/webhook', (req, res) => {
   try {
     console.log('📨 Webhook recibido de Telegram');
+    
+    // Verificar que req.body existe y tiene el formato correcto
+    if (!req.body || typeof req.body !== 'object') {
+      console.error('❌ Webhook: req.body vacío o inválido:', req.body);
+      return res.status(400).json({ error: 'Invalid request body' });
+    }
+    
+    // Verificar que tiene update_id (requerido por Telegram)
+    if (!req.body.update_id) {
+      console.error('❌ Webhook: update_id faltante en req.body:', Object.keys(req.body));
+      return res.status(400).json({ error: 'Missing update_id' });
+    }
+    
+    console.log(`📨 Update ID: ${req.body.update_id}`);
     bot.handleUpdate(req.body);
     res.status(200).send('OK');
   } catch (error) {
-    console.error('❌ Error en webhook:', error);
+    console.error('❌ Error en webhook:', error.message);
+    console.error('❌ Stack trace:', error.stack);
     res.status(500).send('Error');
   }
 });
@@ -951,13 +1003,13 @@ app.get('/api/detalles-pedidos', async (req, res) => {
 // Endpoint para obtener pedidos completos
 app.get('/api/pedidos-completos', async (req, res) => {
   try {
-    console.log('📊 Obteniendo pedidos completos...');
+    console.log('📊 Solicitud a /api/pedidos-completos recibida');
     
     // Obtener datos de ambas hojas
     const pedidos = await obtenerDatosSheet('Pedidos');
     const detalles = await obtenerDatosSheet('DetallePedidos');
     
-    console.log(`📋 Pedidos: ${pedidos.length}, Detalles: ${detalles.length}`);
+    console.log(`📋 Datos obtenidos - Pedidos: ${pedidos.length}, Detalles: ${detalles.length}`);
     
     // Combinar pedidos con sus detalles
     const pedidosCompletos = pedidos.map(pedido => {
@@ -993,7 +1045,7 @@ app.get('/api/pedidos-completos', async (req, res) => {
       return fechaB - fechaA;
     });
     
-    console.log(`✅ ${pedidosCompletos.length} pedidos completos procesados`);
+    console.log(`✅ Procesados ${pedidosCompletos.length} pedidos completos exitosamente`);
     
     res.json({ 
       success: true, 
@@ -1003,7 +1055,8 @@ app.get('/api/pedidos-completos', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error obteniendo pedidos completos:', error);
+    console.error('❌ Error completo en /api/pedidos-completos:', error.message);
+    console.error('❌ Stack trace:', error.stack);
     res.status(500).json({ success: false, error: error.message });
   }
 });
