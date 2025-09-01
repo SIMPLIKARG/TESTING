@@ -257,6 +257,70 @@ function agruparClientesPorLocalidad(clientes) {
   return agrupados;
 }
 
+// Función para agregar productos al carrito (reutilizable)
+async function agregarAlCarrito(ctx, userId, productoId, cantidad) {
+  try {
+    const productos = await obtenerDatosSheet('Productos');
+    const producto = productos.find(p => p.producto_id == productoId);
+    
+    if (!producto) {
+      await ctx.reply('❌ Producto no encontrado');
+      return;
+    }
+    
+    const userState = getUserState(userId);
+    const cliente = userState.cliente;
+    const precio = calcularPrecio(producto, cliente.lista || 1);
+    const importe = precio * cantidad;
+    
+    const cart = getUserCart(userId);
+    
+    // Verificar si el producto ya está en el carrito
+    const itemExistente = cart.find(item => item.producto_id == productoId);
+    
+    if (itemExistente) {
+      // Actualizar cantidad del producto existente
+      itemExistente.cantidad += cantidad;
+      itemExistente.importe = itemExistente.precio_unitario * itemExistente.cantidad;
+      console.log(`📦 ${ctx.from.first_name} actualiza ${producto.producto_nombre}: ${itemExistente.cantidad} unidades`);
+    } else {
+      // Agregar nuevo producto al carrito
+      cart.push({
+        producto_id: productoId,
+        producto_nombre: producto.producto_nombre,
+        categoria_id: producto.categoria_id,
+        cantidad: cantidad,
+        precio_unitario: precio,
+        importe: importe
+      });
+      console.log(`📦 ${ctx.from.first_name} agrega ${producto.producto_nombre}: ${cantidad} unidades`);
+    }
+    
+    setUserCart(userId, cart);
+    
+    const totalCarrito = cart.reduce((sum, item) => sum + item.importe, 0);
+    const totalItems = cart.reduce((sum, item) => sum + item.cantidad, 0);
+    
+    await ctx.reply(
+      `✅ **Agregado al carrito:**\n🛍️ ${producto.producto_nombre}\n📦 Cantidad: ${cantidad}\n💰 Subtotal: $${importe.toLocaleString()}\n\n🛒 **Carrito:** ${totalItems} productos - $${totalCarrito.toLocaleString()}\n\n¿Qué más necesitas?`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }],
+            [{ text: '🛒 Ver carrito', callback_data: 'cart|1' }],
+            [{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]
+          ]
+        }
+      }
+    );
+    
+  } catch (error) {
+    console.error('❌ Error agregando al carrito:', error);
+    await ctx.reply('❌ Error al agregar el producto. Intenta nuevamente.');
+  }
+}
+
 // Función para confirmar pedido
 async function confirmarPedido(ctx, userId, observacion = '') {
   try {
@@ -564,18 +628,325 @@ bot.on('callback_query', async (ctx) => {
       const categoria = categorias.find(c => c.categoria_id == categoriaId);
       const nombreCategoria = categoria ? categoria.categoria_nombre : 'Categoría';
       
-      const keyboard = productosCategoria.map(producto => [{
-        text: `🛍️ ${producto.producto_nombre}`,
-        callback_data: `producto_${producto.producto_id}`
-      }]);
+      // Usar paginación para productos
+      const { mensaje, keyboard } = mostrarProductosPaginados(productosCategoria, categoriaId, 1, nombreCategoria);
       
-      keyboard.push([{ text: '🔍 Buscar producto', callback_data: `buscar_producto_${categoriaId}` }]);
-      keyboard.push([{ text: '📂 Ver categorías', callback_data: 'seguir_comprando' }]);
-      keyboard.push([{ text: '🛒 Ver carrito', callback_data: 'ver_carrito' }]);
-      
-      await ctx.editMessageText(`📂 Categoría: ${nombreCategoria}\n\n🛍️ Selecciona un producto:`, {
+      await ctx.editMessageText(mensaje, {
         reply_markup: { inline_keyboard: keyboard }
       });
+      // Mostrar productos paginados
+      await mostrarProductosPaginados(ctx, categoriaId, 1, nombreCategoria);
+      
+    } else if (callbackData.startsWith('cat|')) {
+      // Nuevo formato compacto: cat|categoriaId|pagina
+      const { id: categoriaId, pagina } = parsearCallbackCompacto(callbackData);
+      console.log(`📂 Categoría ${categoriaId}, página ${pagina}`);
+      
+      const categorias = await obtenerDatosSheet('Categorias');
+      const categoria = categorias.find(c => c.categoria_id == categoriaId);
+      const nombreCategoria = categoria ? categoria.categoria_nombre : 'Categoría';
+      
+      await mostrarProductosPaginados(ctx, categoriaId, pagina, nombreCategoria);
+      
+    } else if (callbackData.startsWith('prod|')) {
+      // Nuevo formato compacto: prod|productoId|pagina|categoriaId
+      const { id: productoId, pagina, extra: categoriaId } = parsearCallbackCompacto(callbackData);
+      console.log(`🛍️ Producto ${productoId} desde página ${pagina}`);
+      
+      await mostrarDetalleProducto(ctx, productoId, pagina, parseInt(categoriaId));
+      
+    } else if (callbackData.startsWith('qty|')) {
+      // Nuevo formato compacto: qty|productoId|cantidad|pagina
+      const { id: productoId, pagina, extra: cantidad } = parsearCallbackCompacto(callbackData);
+      console.log(`📦 Agregando ${cantidad} del producto ${productoId}`);
+      
+      await agregarProductoAlCarrito(ctx, userId, productoId, parseInt(cantidad));
+      
+    } else if (callbackData.startsWith('nav|')) {
+      // Navegación: nav|categoriaId|pagina|direccion
+      const { id: categoriaId, pagina, extra: direccion } = parsearCallbackCompacto(callbackData);
+      
+      const nuevaPagina = direccion === 'next' ? pagina + 1 : pagina - 1;
+      
+      const categorias = await obtenerDatosSheet('Categorias');
+      const categoria = categorias.find(c => c.categoria_id == categoriaId);
+      const nombreCategoria = categoria ? categoria.categoria_nombre : 'Categoría';
+      
+      await mostrarProductosPaginados(ctx, categoriaId, nuevaPagina, nombreCategoria);
+    } else if (callbackData.startsWith('cat|')) {
+      // Manejo de paginación de categorías: cat|categoriaId|pagina
+      const parts = callbackData.split('|');
+      const categoriaId = parseInt(parts[1]);
+      const pagina = parseInt(parts[2]) || 1;
+      
+      console.log(`📂 Categoría ${categoriaId}, página ${pagina}`);
+      
+      const productos = await obtenerDatosSheet('Productos');
+      const productosCategoria = productos.filter(p => p.categoria_id == categoriaId && p.activo === 'SI');
+      
+      if (productosCategoria.length === 0) {
+        await ctx.editMessageText('❌ No hay productos disponibles en esta categoría', {
+          reply_markup: {
+            inline_keyboard: [[{ text: '📂 Ver categorías', callback_data: 'seguir_comprando' }]]
+          }
+        });
+        return;
+      }
+      
+      const categorias = await obtenerDatosSheet('Categorias');
+      const categoria = categorias.find(c => c.categoria_id == categoriaId);
+      const nombreCategoria = categoria ? categoria.categoria_nombre : 'Categoría';
+      
+      const { mensaje, keyboard } = mostrarProductosPaginados(productosCategoria, categoriaId, pagina, nombreCategoria);
+      
+      await ctx.editMessageText(mensaje, {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (callbackData.startsWith('prod|')) {
+      // Manejo de productos: prod|productoId|paginaOrigen|contexto
+      const parts = callbackData.split('|');
+      const productoId = parseInt(parts[1]);
+      const paginaOrigen = parseInt(parts[2]) || 1;
+      const contexto = parts[3]; // categoriaId o 'search'
+      
+      console.log(`🛍️ Producto ${productoId} desde página ${paginaOrigen}, contexto: ${contexto}`);
+      
+      const productos = await obtenerDatosSheet('Productos');
+      const producto = productos.find(p => p.producto_id == productoId);
+      
+      if (!producto) {
+        await ctx.editMessageText('❌ Producto no encontrado');
+        return;
+      }
+      
+      const userState = getUserState(userId);
+      const cliente = userState.cliente;
+      const precio = calcularPrecio(producto, cliente.lista || 1);
+      
+      // Determinar botón de volver según contexto
+      let volverCallback;
+      if (contexto === 'search') {
+        volverCallback = 'search|all|0'; // Volver a búsqueda general
+      } else {
+        volverCallback = `cat|${contexto}|${paginaOrigen}`; // Volver a categoría y página específica
+      }
+      
+      const keyboard = [
+        [
+          { text: '1️⃣', callback_data: `qty|${productoId}|${paginaOrigen}|1` },
+          { text: '2️⃣', callback_data: `qty|${productoId}|${paginaOrigen}|2` },
+          { text: '3️⃣', callback_data: `qty|${productoId}|${paginaOrigen}|3` }
+        ],
+        [
+          { text: '5️⃣', callback_data: `qty|${productoId}|${paginaOrigen}|5` },
+          { text: '🔟', callback_data: `qty|${productoId}|${paginaOrigen}|10` },
+          { text: '🔢 Otra', callback_data: `custom|${productoId}|${paginaOrigen}` }
+        ],
+        [{ text: '🔙 Volver', callback_data: volverCallback }],
+        [{ text: '🛒 Ver carrito', callback_data: 'cart|1' }]
+      ];
+      
+      await ctx.editMessageText(
+        `🛍️ **${producto.producto_nombre}**\n💰 Precio: $${precio.toLocaleString()}\n\n📦 ¿Cuántas unidades?`,
+        { 
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: keyboard } 
+        }
+      );
+      
+    } else if (callbackData.startsWith('qty|')) {
+      // Manejo de cantidades: qty|productoId|paginaOrigen|cantidad
+      const parts = callbackData.split('|');
+      const productoId = parseInt(parts[1]);
+      const paginaOrigen = parseInt(parts[2]);
+      const cantidad = parseInt(parts[3]);
+      
+      await agregarAlCarrito(ctx, userId, productoId, cantidad);
+      
+    } else if (callbackData.startsWith('custom|')) {
+      // Cantidad personalizada: custom|productoId|paginaOrigen
+      const parts = callbackData.split('|');
+      const productoId = parseInt(parts[1]);
+      const paginaOrigen = parseInt(parts[2]);
+      
+      setUserState(userId, { 
+        ...getUserState(userId), 
+        step: 'cantidad_custom', 
+        producto_id: productoId,
+        pagina_origen: paginaOrigen
+      });
+      
+      await ctx.editMessageText('🔢 Escribe la cantidad que deseas:');
+      
+    } else if (callbackData.startsWith('cart|')) {
+      // Ver carrito paginado: cart|pagina
+      const pagina = parseInt(callbackData.split('|')[1]) || 1;
+      const cart = getUserCart(userId);
+      
+      if (cart.length === 0) {
+        await ctx.editMessageText('🛒 Tu carrito está vacío', {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
+            ]
+          }
+        });
+        return;
+      }
+      
+      const { mensaje, keyboard } = mostrarCarritoPaginado(cart, pagina, userId);
+      
+      await ctx.editMessageText(mensaje, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (callbackData.startsWith('cartmod|')) {
+      // Modificar carrito: cartmod|indice|accion|pagina
+      const parts = callbackData.split('|');
+      const indice = parseInt(parts[1]);
+      const accion = parts[2]; // 'inc', 'dec', 'del'
+      const pagina = parseInt(parts[3]) || 1;
+      
+      const cart = getUserCart(userId);
+      
+      if (indice < 0 || indice >= cart.length) {
+        await ctx.answerCbQuery('❌ Producto no encontrado');
+        return;
+      }
+      
+      const item = cart[indice];
+      
+      if (accion === 'inc') {
+        item.cantidad += 1;
+        item.importe = item.precio_unitario * item.cantidad;
+        console.log(`➕ ${userName} incrementa ${item.producto_nombre} a ${item.cantidad}`);
+        
+      } else if (accion === 'dec') {
+        if (item.cantidad > 1) {
+          item.cantidad -= 1;
+          item.importe = item.precio_unitario * item.cantidad;
+          console.log(`➖ ${userName} decrementa ${item.producto_nombre} a ${item.cantidad}`);
+        } else {
+          await ctx.answerCbQuery('❌ Cantidad mínima es 1');
+          return;
+        }
+        
+      } else if (accion === 'del') {
+        console.log(`🗑️ ${userName} elimina ${item.producto_nombre}`);
+        cart.splice(indice, 1);
+        
+        // Si se eliminó el último producto, mostrar carrito vacío
+        if (cart.length === 0) {
+          await ctx.editMessageText('🗑️ Producto eliminado. Tu carrito está vacío.', {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
+              ]
+            }
+          });
+          setUserCart(userId, cart);
+          return;
+        }
+        
+        // Ajustar página si es necesaria
+        const ITEMS_POR_PAGINA = 5;
+        const totalPaginas = Math.ceil(cart.length / ITEMS_POR_PAGINA);
+        if (pagina > totalPaginas) {
+          pagina = totalPaginas;
+        }
+      }
+      
+      setUserCart(userId, cart);
+      
+      // Mostrar carrito actualizado
+      const { mensaje, keyboard } = mostrarCarritoPaginado(cart, pagina, userId);
+      
+      await ctx.editMessageText(mensaje, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (callbackData.startsWith('search|')) {
+      // Iniciar búsqueda: search|tipo|categoriaId
+      const parts = callbackData.split('|');
+      const tipo = parts[1]; // 'cat' o 'all'
+      const categoriaId = parts[2] !== '0' ? parseInt(parts[2]) : null;
+      
+      setUserState(userId, { 
+        ...getUserState(userId), 
+        step: 'buscar_producto',
+        categoria_busqueda: categoriaId,
+        busqueda_tipo: tipo
+      });
+      
+      const scope = categoriaId ? 'en esta categoría' : 'en todo el catálogo';
+      await ctx.editMessageText(`🔍 Escribe el nombre del producto que buscas ${scope}:`);
+      
+    } else if (callbackData.startsWith('searchpage|')) {
+      // Navegación de búsqueda: searchpage|termino|pagina|categoriaId
+      const parts = callbackData.split('|');
+      const termino = parts[1];
+      const pagina = parseInt(parts[2]) || 1;
+      const categoriaId = parts[3] !== 'all' ? parseInt(parts[3]) : null;
+      
+      const productos = await obtenerDatosSheet('Productos');
+      const productosFiltrados = buscarProductos(productos, termino, categoriaId);
+      
+      if (productosFiltrados.length === 0) {
+        await ctx.editMessageText(`❌ No se encontraron productos con "${termino}"`, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔍 Nueva búsqueda', callback_data: categoriaId ? `search|cat|${categoriaId}` : 'search|all|0' }],
+              [{ text: '📂 Ver categorías', callback_data: 'seguir_comprando' }]
+            ]
+          }
+        });
+        return;
+      }
+      
+      const { mensaje, keyboard } = mostrarBusquedaPaginada(productosFiltrados, termino, pagina, categoriaId);
+      
+      await ctx.editMessageText(mensaje, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (callbackData === 'export_cart') {
+      // Exportar carrito como archivo
+      const cart = getUserCart(userId);
+      const userState = getUserState(userId);
+      const cliente = userState.cliente;
+      
+      if (!cart || cart.length === 0) {
+        await ctx.answerCbQuery('❌ El carrito está vacío');
+        return;
+      }
+      
+      if (!cliente) {
+        await ctx.answerCbQuery('❌ No hay cliente seleccionado');
+        return;
+      }
+      
+      const pedidoId = userState.pedido_id || 'TEMP';
+      const contenidoArchivo = generarArchivoCarrito(cart, cliente, pedidoId);
+      
+      // Enviar como documento
+      await ctx.replyWithDocument({
+        source: Buffer.from(contenidoArchivo, 'utf8'),
+        filename: `carrito_${cliente.nombre.replace(/\s+/g, '_')}_${pedidoId}.txt`
+      }, {
+        caption: `📄 Carrito completo para ${cliente.nombre}\n💰 Total: $${cart.reduce((sum, item) => sum + item.importe, 0).toLocaleString()}`,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🛒 Volver al carrito', callback_data: 'cart|1' }],
+            [{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]
+          ]
+        }
+      });
+      
+      console.log(`📄 ${userName} exportó carrito con ${cart.length} productos`);
       
     } else if (callbackData.startsWith('producto_')) {
       const productoId = parseInt(callbackData.split('_')[1]);
@@ -670,6 +1041,7 @@ bot.on('callback_query', async (ctx) => {
       );
       
     } else if (callbackData === 'ver_carrito') {
+      // Redirigir a carrito paginado
       const cart = getUserCart(userId);
       
       if (cart.length === 0) {
@@ -683,38 +1055,7 @@ bot.on('callback_query', async (ctx) => {
         return;
       }
       
-      let mensaje = '🛒 *Tu carrito:*\n\n';
-      let total = 0;
-      
-      cart.forEach((item, index) => {
-        mensaje += `${index + 1}. *${item.producto_nombre}*\n`;
-        mensaje += `   📦 Cantidad: ${item.cantidad}\n`;
-        mensaje += `   💰 $${item.precio_unitario.toLocaleString()} c/u = $${item.importe.toLocaleString()}\n\n`;
-        total += item.importe;
-      });
-      
-      mensaje += `💰 *Total: $${total.toLocaleString()}*`;
-      
-      // Crear botones para eliminar productos individuales
-      const keyboard = [];
-      
-      // Agregar botón de eliminar para cada producto (máximo 5 por fila)
-      if (cart.length <= 10) { // Solo mostrar botones individuales si hay pocos productos
-        cart.forEach((item, index) => {
-          keyboard.push([{
-            text: `🗑️ Eliminar: ${item.producto_nombre.substring(0, 25)}${item.producto_nombre.length > 25 ? '...' : ''}`,
-            callback_data: `eliminar_item_${index}`
-          }]);
-        });
-        
-        // Separador visual
-        keyboard.push([{ text: '── ACCIONES ──', callback_data: 'separator' }]);
-      }
-      
-      // Botones principales
-      keyboard.push([{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }]);
-      keyboard.push([{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]);
-      keyboard.push([{ text: '🗑️ Vaciar carrito', callback_data: 'vaciar_carrito' }]);
+      const { mensaje, keyboard } = mostrarCarritoPaginado(cart, 1, userId);
       
       await ctx.reply(mensaje, {
         parse_mode: 'Markdown',
@@ -863,43 +1204,15 @@ bot.on('text', async (ctx) => {
       }
       
       const productoId = userState.producto_id;
-      const productos = await obtenerDatosSheet('Productos');
-      const producto = productos.find(p => p.producto_id == productoId);
+      await agregarAlCarrito(ctx, userId, productoId, cantidad);
       
-      if (!producto) {
-        await ctx.reply('❌ Producto no encontrado');
-        return;
-      }
-      
-      const cliente = userState.cliente;
-      const precio = calcularPrecio(producto, cliente.lista || 1);
-      const importe = precio * cantidad;
-      
-      const cart = getUserCart(userId);
-      cart.push({
-        producto_id: productoId,
-        producto_nombre: producto.producto_nombre,
-        categoria_id: producto.categoria_id,
-        cantidad: cantidad,
-        precio_unitario: precio,
-        importe: importe
+      // Limpiar estado de cantidad custom
+      setUserState(userId, { 
+        ...userState, 
+        step: 'seleccionar_categoria',
+        producto_id: null,
+        pagina_origen: null
       });
-      setUserCart(userId, cart);
-      
-      setUserState(userId, { ...userState, step: 'seleccionar_categoria' });
-      
-      await ctx.reply(
-        `✅ Agregado al carrito:\n🛍️ ${producto.producto_nombre}\n📦 Cantidad: ${cantidad}\n💰 Subtotal: $${importe.toLocaleString()}\n\n¿Qué más necesitas?`,
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }],
-              [{ text: '🛒 Ver carrito', callback_data: 'ver_carrito' }],
-              [{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]
-            ]
-          }
-        }
-      );
       
     } else if (userState.step === 'buscar_cliente') {
       const termino = text.toLowerCase().trim();
@@ -954,45 +1267,41 @@ bot.on('text', async (ctx) => {
       
       const productos = await obtenerDatosSheet('Productos');
       const categoriaId = userState.categoria_busqueda;
+      const tipo = userState.busqueda_tipo || 'all';
       
-      const productosFiltrados = productos.filter(producto => {
-        const nombre = (producto.producto_nombre || '').toLowerCase();
-        const enCategoria = !categoriaId || producto.categoria_id == categoriaId;
-        const activo = producto.activo === 'SI';
-        return nombre.includes(termino) && enCategoria && activo;
-      });
+      console.log(`🔍 ${userName} busca "${termino}" en ${tipo === 'cat' ? `categoría ${categoriaId}` : 'todo el catálogo'}`);
+      
+      const productosFiltrados = buscarProductos(productos, termino, categoriaId);
       
       if (productosFiltrados.length === 0) {
-        await ctx.reply(`❌ No se encontraron productos con "${text}"`, {
+        const scope = categoriaId ? 'en esta categoría' : 'en el catálogo';
+        await ctx.reply(`❌ No se encontraron productos con "${text}" ${scope}`, {
           reply_markup: {
             inline_keyboard: [
-              [{ text: '🔍 Buscar de nuevo', callback_data: `buscar_producto_${categoriaId}` }],
-              [{ text: '📂 Ver categoría', callback_data: `categoria_${categoriaId}` }]
+              [{ text: '🔍 Nueva búsqueda', callback_data: categoriaId ? `search|cat|${categoriaId}` : 'search|all|0' }],
+              [{ text: '📂 Ver categorías', callback_data: 'seguir_comprando' }]
             ]
           }
         });
         return;
       }
       
-      const keyboard = productosFiltrados.map(producto => [{
-        text: `🛍️ ${producto.producto_nombre}`,
-        callback_data: `producto_${producto.producto_id}`
-      }]);
+      // Mostrar resultados paginados
+      const { mensaje, keyboard } = mostrarBusquedaPaginada(productosFiltrados, termino, 1, categoriaId);
       
-      const botonesBusquedaExitosa = categoriaId ? [
-        [{ text: '🔍 Buscar de nuevo', callback_data: `buscar_producto_${categoriaId}` }],
-        [{ text: '📂 Ver categoría', callback_data: `categoria_${categoriaId}` }]
-      ] : [
-        [{ text: '🔍 Buscar de nuevo', callback_data: 'buscar_producto_general' }],
-        [{ text: '📂 Ver categorías', callback_data: 'seguir_comprando' }]
-      ];
+      // Guardar término de búsqueda para navegación
+      setSearchState(userId, { termino, categoriaId });
       
-      keyboard.push(...botonesBusquedaExitosa);
-      
-      await ctx.reply(`🔍 Encontrados ${productosFiltrados.length} producto(s):`, {
+      await ctx.reply(mensaje, {
+        parse_mode: 'Markdown',
         reply_markup: { inline_keyboard: keyboard }
       });
       
+      // Limpiar estado de búsqueda
+      setUserState(userId, { 
+        ...userState, 
+        step: 'seleccionar_categoria' 
+      });
     } else if (userState.step === 'escribir_observacion') {
       const observacion = text.trim();
       
