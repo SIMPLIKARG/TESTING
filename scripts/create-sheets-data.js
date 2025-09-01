@@ -11,78 +11,6 @@ require('dotenv').config();
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID;
 
-// Definir qué columnas deben ser numéricas para cada hoja
-const columnasNumericas = {
-  Clientes: ['cliente_id', 'lista'],
-  Categorias: ['categoria_id'],
-  Productos: ['producto_id', 'categoria_id', 'precio1', 'precio2', 'precio3', 'precio4', 'precio5', 'proveedor_id'],
-  Pedidos: ['cliente_id', 'items_cantidad', 'total'],
-  DetallePedidos: ['producto_id', 'categoria_id', 'cantidad', 'precio_unitario', 'importe'],
-  Metricas: ['producto_id', 'categoria_id', 'proveedor_id', 'cantidad_vendida', 'ingresos_totales', 'costo_total_estimado', 'ganancia_total_estimada', 'rentabilidad_porcentual']
-};
-
-// Función para normalizar números (convertir comas a puntos y limpiar formato)
-function normalizarNumero(valor) {
-  if (valor === '' || valor === null || valor === undefined || valor === 'null' || valor === 'undefined') {
-    return 0;
-  }
-  
-  // Convertir a string para procesamiento
-  let valorStr = String(valor).trim();
-  
-  // Si ya es un número válido, devolverlo
-  if (!isNaN(valorStr) && !isNaN(parseFloat(valorStr))) {
-    return parseFloat(valorStr);
-  }
-  
-  // Limpiar el formato de números:
-  // - Remover espacios
-  // - Reemplazar comas por puntos (formato decimal argentino -> estadounidense)
-  // - Remover caracteres no numéricos excepto puntos y signos negativos
-  valorStr = valorStr
-    .replace(/\s/g, '') // Remover espacios
-    .replace(/,/g, '.') // Reemplazar comas por puntos
-    .replace(/[^\d.-]/g, ''); // Mantener solo dígitos, puntos y signos negativos
-  
-  // Convertir a número
-  const numero = parseFloat(valorStr);
-  
-  // Si no es un número válido, devolver 0
-  return isNaN(numero) ? 0 : numero;
-}
-
-// Función para procesar datos antes de enviar a Google Sheets
-function procesarDatosParaSheets(nombreHoja, datos) {
-  if (!datos || datos.length === 0) return datos;
-  
-  const columnasNum = columnasNumericas[nombreHoja] || [];
-  
-  return datos.map((fila, filaIndex) => {
-    if (filaIndex === 0) {
-      // Es la fila de encabezados, no procesarla
-      return fila;
-    }
-    
-    return fila.map((celda, columnaIndex) => {
-      // Obtener el nombre de la columna desde la primera fila (encabezados)
-      const nombreColumna = datos[0][columnaIndex];
-      
-      // Si esta columna debe ser numérica
-      if (columnasNum.includes(nombreColumna)) {
-        return normalizarNumero(celda);
-      }
-      
-      // Para columnas no numéricas, mantener el valor original
-      // pero convertir null/undefined a string vacío
-      if (celda === null || celda === undefined) {
-        return '';
-      }
-      
-      return celda;
-    });
-  });
-}
-
 const auth = new GoogleAuth({
   credentials: {
     client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
@@ -303,16 +231,13 @@ async function crearYPoblarSheets() {
         range: `${nombreHoja}!A:Z`
       });
       
-      // Procesar datos para reemplazar celdas vacías con 0 en columnas numéricas
-      const datosProcessados = procesarDatosParaSheets(nombreHoja, datos);
-      
       // Insertar datos
       await sheets.spreadsheets.values.update({
         spreadsheetId: SPREADSHEET_ID,
         range: `${nombreHoja}!A1`,
-        valueInputOption: 'USER_ENTERED',
+        valueInputOption: 'RAW',
         requestBody: {
-          values: datosProcessados
+          values: datos
         }
       });
       

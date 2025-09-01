@@ -6,6 +6,7 @@ import { google } from 'googleapis';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import multer from 'multer';
 
 dotenv.config();
 
@@ -15,9 +16,16 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
+// Configure Multer for file uploads
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  }
+});
+
+// Middleware básico
 app.use(cors());
-app.use(express.json());
 app.use(express.static('public'));
 
 // Configuración de Google Sheets
@@ -35,11 +43,12 @@ const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID;
 // Bot de Telegram
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN || 'dummy_token');
 
-// Estado del usuario (en memoria)
+// Estado del usuario (en memoria - en producción usar base de datos)
 const userStates = new Map();
 const userCarts = new Map();
+const searchStates = new Map();
 
-// Datos de ejemplo
+// Datos de ejemplo (fallback si no hay Google Sheets)
 const datosEjemplo = {
   clientes: [
     { cliente_id: 1, nombre: 'Juan Pérez', lista: 1, localidad: 'Centro' },
@@ -56,11 +65,15 @@ const datosEjemplo = {
     { categoria_id: 5, categoria_nombre: 'Conservas' }
   ],
   productos: [
-    { producto_id: 1, categoria_id: 1, producto_nombre: 'Oreo Original 117g', precio: 450, activo: 'SI' },
-    { producto_id: 2, categoria_id: 1, producto_nombre: 'Pepitos Chocolate 100g', precio: 380, activo: 'SI' },
-    { producto_id: 3, categoria_id: 2, producto_nombre: 'Coca Cola 500ml', precio: 350, activo: 'SI' },
-    { producto_id: 4, categoria_id: 3, producto_nombre: 'Leche Entera 1L', precio: 280, activo: 'SI' },
-    { producto_id: 5, categoria_id: 4, producto_nombre: 'Pan Lactal 500g', precio: 320, activo: 'SI' }
+    { producto_id: 1, categoria_id: 1, producto_nombre: 'Oreo Original 117g', precio1: 450, precio2: 420, precio3: 400, precio4: 380, precio5: 360, activo: 'SI' },
+    { producto_id: 2, categoria_id: 1, producto_nombre: 'Pepitos Chocolate 100g', precio1: 380, precio2: 360, precio3: 340, precio4: 320, precio5: 300, activo: 'SI' },
+    { producto_id: 3, categoria_id: 2, producto_nombre: 'Coca Cola 500ml', precio1: 350, precio2: 330, precio3: 310, precio4: 290, precio5: 270, activo: 'SI' },
+    { producto_id: 4, categoria_id: 3, producto_nombre: 'Leche Entera 1L', precio1: 280, precio2: 260, precio3: 240, precio4: 220, precio5: 200, activo: 'SI' },
+    { producto_id: 5, categoria_id: 4, producto_nombre: 'Pan Lactal 500g', precio1: 320, precio2: 300, precio3: 280, precio4: 260, precio5: 240, activo: 'SI' }
+  ],
+  pedidos: [
+    { pedido_id: 'PED001', fecha_hora: '2024-01-15 10:30:00', cliente_id: 1, cliente_nombre: 'Juan Pérez', items_cantidad: 3, total: 1180, estado: 'CONFIRMADO' },
+    { pedido_id: 'PED002', fecha_hora: '2024-01-15 14:20:00', cliente_id: 2, cliente_nombre: 'María González', items_cantidad: 2, total: 770, estado: 'PENDIENTE' }
   ],
   detallepedidos: [
     { detalle_id: 'DET001', pedido_id: 'PED001', producto_id: 1, producto_nombre: 'Oreo Original 117g', categoria_id: 1, cantidad: 2, precio_unitario: 450, importe: 900 },
@@ -86,6 +99,14 @@ function setUserCart(userId, cart) {
   userCarts.set(userId, cart);
 }
 
+function getSearchState(userId) {
+  return searchStates.get(userId) || {};
+}
+
+function setSearchState(userId, state) {
+  searchStates.set(userId, state);
+}
+
 // Función para obtener datos de Google Sheets
 async function obtenerDatosSheet(nombreHoja) {
   try {
@@ -106,7 +127,9 @@ async function obtenerDatosSheet(nombreHoja) {
     if (rows.length === 0) return [];
 
     const headers = rows[0];
+    console.log(`📋 Encabezados:`, headers);
     
+    // Filtrar filas vacías y mapear datos
     const data = rows.slice(1)
       .filter(row => row && row.length > 0 && row[0] && row[0].toString().trim())
       .map(row => {
@@ -117,6 +140,7 @@ async function obtenerDatosSheet(nombreHoja) {
         return obj;
       })
       .filter(obj => {
+        // Filtrar objetos con datos válidos según la hoja
         if (nombreHoja === 'Clientes') {
           return obj.cliente_id && obj.nombre && obj.nombre !== '';
         }
@@ -125,6 +149,9 @@ async function obtenerDatosSheet(nombreHoja) {
         }
         if (nombreHoja === 'Productos') {
           return obj.producto_id && obj.producto_nombre && obj.producto_nombre !== '';
+        }
+        if (nombreHoja === 'Pedidos' || nombreHoja === 'DetallePedidos') {
+          return Object.keys(obj).some(key => obj[key] !== '');
         }
         return Object.values(obj).some(val => val && val !== '');
       });
@@ -161,7 +188,13 @@ async function agregarDatosSheet(nombreHoja, datos) {
   }
 }
 
-// Función para generar ID de pedido
+// Función para calcular precio según lista del cliente
+function calcularPrecio(producto, listaCliente) {
+  const precioKey = `precio${listaCliente}`;
+  return parseFloat(producto[precioKey]) || parseFloat(producto.precio1) || 0;
+}
+
+// Función para generar ID de pedido autoincremental
 async function generarPedidoId() {
   try {
     if (!SPREADSHEET_ID) {
@@ -170,6 +203,7 @@ async function generarPedidoId() {
 
     const pedidos = await obtenerDatosSheet('Pedidos');
     
+    // Encontrar el último número de pedido
     let ultimoNumero = 0;
     pedidos.forEach(pedido => {
       if (pedido.pedido_id && pedido.pedido_id.startsWith('PD')) {
@@ -189,15 +223,206 @@ async function generarPedidoId() {
   }
 }
 
+// Función para agrupar clientes por localidad
+function agruparClientesPorLocalidad(clientes) {
+  const agrupados = {};
+  
+  clientes.forEach(cliente => {
+    const localidad = cliente.localidad || 'Sin localidad';
+    if (!agrupados[localidad]) {
+      agrupados[localidad] = [];
+    }
+    agrupados[localidad].push(cliente);
+  });
+  
+  return agrupados;
+}
+
+// Función para calcular métricas de productos
+async function calcularMetricas() {
+  try {
+    console.log('📊 Calculando métricas de productos...');
+    
+    const productos = await obtenerDatosSheet('Productos');
+    const detalles = await obtenerDatosSheet('DetallePedidos');
+    const categorias = await obtenerDatosSheet('Categorias');
+    
+    console.log(`📦 ${productos.length} productos, ${detalles.length} detalles, ${categorias.length} categorías`);
+    
+    const metricas = productos.map(producto => {
+      // Encontrar categoría
+      const categoria = categorias.find(c => c.categoria_id == producto.categoria_id);
+      
+      // Calcular ventas de este producto
+      const ventasProducto = detalles.filter(d => d.producto_id == producto.producto_id);
+      
+      const cantidadVendida = ventasProducto.reduce((sum, venta) => {
+        return sum + (parseFloat(venta.cantidad) || 0);
+      }, 0);
+      
+      const ingresosTotales = ventasProducto.reduce((sum, venta) => {
+        return sum + (parseFloat(venta.importe) || 0);
+      }, 0);
+      
+      // Estimar costos (70% del precio de venta como ejemplo)
+      const precioPromedio = parseFloat(producto.precio1) || 0;
+      const costoEstimado = precioPromedio * 0.7;
+      const costoTotal = costoEstimado * cantidadVendida;
+      const gananciaTotal = ingresosTotales - costoTotal;
+      const rentabilidad = ingresosTotales > 0 ? (gananciaTotal / ingresosTotales) * 100 : 0;
+      
+      return {
+        producto_id: producto.producto_id,
+        producto_nombre: producto.producto_nombre,
+        categoria_id: producto.categoria_id,
+        categoria_nombre: categoria ? categoria.categoria_nombre : 'Sin categoría',
+        proveedor_id: producto.proveedor_id || '',
+        proveedor_nombre: producto.proveedor_nombre || '',
+        cantidad_vendida: cantidadVendida,
+        ingresos_totales: Math.round(ingresosTotales),
+        costo_total_estimado: Math.round(costoTotal),
+        ganancia_total_estimada: Math.round(gananciaTotal),
+        rentabilidad_porcentual: Math.round(rentabilidad * 100) / 100
+      };
+    });
+    
+    // Ordenar por ingresos totales descendente
+    metricas.sort((a, b) => b.ingresos_totales - a.ingresos_totales);
+    
+    console.log(`✅ Métricas calculadas para ${metricas.length} productos`);
+    return metricas;
+    
+  } catch (error) {
+    console.error('❌ Error calculando métricas:', error);
+    return [];
+  }
+}
+
+// Función para actualizar hoja de métricas
+async function actualizarHojaMetricas() {
+  try {
+    if (!SPREADSHEET_ID) {
+      console.log('⚠️ Google Sheets no configurado, no se pueden actualizar métricas');
+      return false;
+    }
+    
+    console.log('🔄 Actualizando hoja de Métricas...');
+    
+    const metricas = await calcularMetricas();
+    
+    if (metricas.length === 0) {
+      console.log('⚠️ No hay métricas para actualizar');
+      return false;
+    }
+    
+    // Preparar datos para Google Sheets
+    const headers = [
+      'producto_id',
+      'producto_nombre', 
+      'categoria_id',
+      'categoria_nombre',
+      'proveedor_id',
+      'proveedor_nombre',
+      'cantidad_vendida',
+      'ingresos_totales',
+      'costo_total_estimado',
+      'ganancia_total_estimada',
+      'rentabilidad_porcentual'
+    ];
+    
+    const filas = metricas.map(metrica => [
+      metrica.producto_id,
+      metrica.producto_nombre,
+      metrica.categoria_id,
+      metrica.categoria_nombre,
+      metrica.proveedor_id,
+      metrica.proveedor_nombre,
+      metrica.cantidad_vendida,
+      metrica.ingresos_totales,
+      metrica.costo_total_estimado,
+      metrica.ganancia_total_estimada,
+      metrica.rentabilidad_porcentual
+    ]);
+    
+    // Limpiar hoja de métricas
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Metricas!A:Z'
+    });
+    
+    // Insertar encabezados y datos
+    const todosLosDatos = [headers, ...filas];
+    
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Metricas!A1',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: todosLosDatos
+      }
+    });
+    
+    console.log(`✅ Hoja Métricas actualizada con ${metricas.length} productos`);
+    return true;
+    
+  } catch (error) {
+    console.error('❌ Error actualizando métricas:', error);
+    return false;
+  }
+}
+
 // Comandos del bot
+bot.start(async (ctx) => {
+  const userId = ctx.from.id;
+  const userName = ctx.from.first_name || 'Usuario';
+  
+  console.log(`🚀 Usuario ${userName} (${userId}) inició el bot`);
+  
+  setUserState(userId, { step: 'idle' });
+  setUserCart(userId, []);
+  
+  const mensaje = `¡Hola ${userName}! 👋\n\n🛒 Bienvenido al sistema de pedidos\n\n¿Qué te gustaría hacer?`;
+  
+  await ctx.reply(mensaje, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🛒 Hacer pedido', callback_data: 'hacer_pedido' }],
+        [{ text: '📋 Ver mis pedidos', callback_data: 'ver_pedidos' }],
+        [{ text: '❓ Ayuda', callback_data: 'ayuda' }]
+      ]
+    }
+  });
+});
+
+bot.command('ayuda', async (ctx) => {
+  const mensaje = `📋 *Comandos disponibles:*\n\n` +
+    `🛒 /start - Iniciar nuevo pedido\n` +
+    `📋 /pedidos - Ver mis pedidos\n` +
+    `❓ /ayuda - Mostrar esta ayuda\n\n` +
+    `💡 *Cómo hacer un pedido:*\n` +
+    `1. Presiona "Hacer pedido"\n` +
+    `2. Selecciona tu cliente\n` +
+    `3. Elige categorías y productos\n` +
+    `4. Agrega al carrito\n` +
+    `5. Confirma tu pedido`;
+  
+  await ctx.reply(mensaje, { parse_mode: 'Markdown' });
+});
+
+// Manejo de callbacks
 bot.on('callback_query', async (ctx) => {
   const userId = ctx.from.id;
+  const userName = ctx.from.first_name || 'Usuario';
   const callbackData = ctx.callbackQuery.data;
+  
+  console.log(`🔘 Callback de ${userName}: ${callbackData}`);
   
   try {
     await ctx.answerCbQuery();
     
     if (callbackData === 'hacer_pedido') {
+      console.log(`🛒 ${userName} inicia pedido`);
+      
       const clientes = await obtenerDatosSheet('Clientes');
       
       if (clientes.length === 0) {
@@ -205,44 +430,435 @@ bot.on('callback_query', async (ctx) => {
         return;
       }
       
+      console.log(`👥 ${clientes.length} clientes disponibles`);
       setUserState(userId, { step: 'seleccionar_cliente' });
       
-      const keyboard = clientes.map(cliente => [{
-        text: `👤 ${cliente.nombre}`,
-        callback_data: `cliente_${cliente.cliente_id}`
-      }]);
+      // Agrupar clientes por localidad
+      const clientesAgrupados = agruparClientesPorLocalidad(clientes);
+      const localidades = Object.keys(clientesAgrupados);
+      
+      // Crear keyboard con búsqueda primero, luego localidades
+      const keyboard = [];
+      
+      // Botón de búsqueda al inicio
+      keyboard.push([{ text: '🔍 Buscar cliente', callback_data: 'buscar_cliente' }]);
+      
+      // Separador visual
+      keyboard.push([{ text: '📍 ── LOCALIDADES ──', callback_data: 'separator' }]);
+      
+      // Agregar cada localidad
+      localidades.forEach(localidad => {
+        const cantidadClientes = clientesAgrupados[localidad].length;
+        keyboard.push([{
+          text: `📍 ${localidad} (${cantidadClientes})`,
+          callback_data: `localidad_${localidad}`
+        }]);
+      });
       
       await ctx.reply('👤 Selecciona el cliente:', {
         reply_markup: { inline_keyboard: keyboard }
       });
       
+    } else if (callbackData === 'seguir_comprando') {
+      const userState = getUserState(userId);
+      const cliente = userState.cliente;
+      const cart = getUserCart(userId);
+      
+      if (!cliente) {
+        return bot.handleUpdate({
+          callback_query: { ...ctx.callbackQuery, data: 'hacer_pedido' }
+        });
+      }
+      
+      console.log(`🛒 ${userName} sigue comprando para ${cliente.nombre}`);
+      
+      const categorias = await obtenerDatosSheet('Categorias');
+      
+      const keyboard = categorias.map(cat => [{
+        text: `📂 ${cat.categoria_nombre || cat.Categoria_nombre || 'Categoría'}`,
+        callback_data: `categoria_${cat.categoria_id || cat.Categoria_id || cat.id}`
+      }]);
+      
+      keyboard.push([{ text: '🔍 Buscar producto', callback_data: 'buscar_producto_general' }]);
+      keyboard.push([{ text: '🛒 Ver carrito', callback_data: 'ver_carrito' }]);
+      
+      const cartInfo = cart.length > 0 ? ` (${cart.length} productos)` : '';
+      
+      await ctx.editMessageText(`✅ Cliente: ${cliente.nombre}${cartInfo}\n\n📂 Selecciona una categoría:`, {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (callbackData === 'buscar_cliente') {
+      console.log(`🔍 ${userName} inicia búsqueda de cliente`);
+      setUserState(userId, { step: 'buscar_cliente' });
+      await ctx.editMessageText('🔍 Escribe el nombre del cliente que buscas:');
+      
     } else if (callbackData.startsWith('cliente_')) {
       const clienteId = parseInt(callbackData.split('_')[1]);
+      console.log(`👤 Cliente: ${clienteId}`);
       
       const clientes = await obtenerDatosSheet('Clientes');
-      const cliente = clientes.find(c => c.cliente_id == clienteId);
+      const cliente = clientes.find(c => 
+        (c.cliente_id == clienteId) || 
+        (c.Cliente_id == clienteId) || 
+        (c.id == clienteId)
+      );
       
       if (!cliente) {
         await ctx.reply('❌ Cliente no encontrado');
         return;
       }
       
+      // Normalizar nombre del cliente
+      const nombreCliente = cliente.nombre || cliente.Nombre || 'Cliente';
+      const clienteNormalizado = {
+        ...cliente,
+        nombre: nombreCliente
+      };
+      
       setUserState(userId, { 
         step: 'seleccionar_categoria', 
-        cliente: cliente,
+        cliente: clienteNormalizado,
         pedido_id: await generarPedidoId()
       });
       
       const categorias = await obtenerDatosSheet('Categorias');
       
       const keyboard = categorias.map(cat => [{
-        text: `📂 ${cat.categoria_nombre}`,
-        callback_data: `categoria_${cat.categoria_id}`
+        text: `📂 ${cat.categoria_nombre || cat.Categoria_nombre || 'Categoría'}`,
+        callback_data: `categoria_${cat.categoria_id || cat.Categoria_id || cat.id}`
       }]);
       
-      await ctx.editMessageText(`✅ Cliente: ${cliente.nombre}\n\n📂 Selecciona una categoría:`, {
+      keyboard.push([{ text: '🔍 Buscar producto', callback_data: 'buscar_producto_general' }]);
+      keyboard.push([{ text: '🛒 Ver carrito', callback_data: 'ver_carrito' }]);
+      
+      await ctx.editMessageText(`✅ Cliente: ${nombreCliente}\n\n📂 Selecciona una categoría:`, {
         reply_markup: { inline_keyboard: keyboard }
       });
+      
+    } else if (callbackData.startsWith('localidad_')) {
+      const localidad = decodeURIComponent(callbackData.split('_')[1]);
+      console.log(`📍 Localidad seleccionada: ${localidad}`);
+      
+      const clientes = await obtenerDatosSheet('Clientes');
+      const clientesLocalidad = clientes.filter(cliente => 
+        (cliente.localidad || 'Sin localidad') === localidad
+      );
+      
+      if (clientesLocalidad.length === 0) {
+        await ctx.reply('❌ No hay clientes en esta localidad');
+        return;
+      }
+      
+      const keyboard = clientesLocalidad.map(cliente => {
+        const nombreCliente = cliente.nombre || cliente.Nombre || `Cliente ${cliente.cliente_id}`;
+        const clienteId = cliente.cliente_id || cliente.Cliente_id || cliente.id;
+        
+        return [{
+          text: `👤 ${nombreCliente}`,
+          callback_data: `cliente_${clienteId}`
+        }];
+      });
+      
+      // Botón para volver a localidades
+      keyboard.push([{ text: '🔙 Volver a localidades', callback_data: 'hacer_pedido' }]);
+      
+      await ctx.editMessageText(`📍 ${localidad} - Selecciona el cliente:`, {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (callbackData === 'separator') {
+      // No hacer nada, es solo visual
+      return;
+      
+    } else if (callbackData.startsWith('categoria_')) {
+      const categoriaId = parseInt(callbackData.split('_')[1]);
+      console.log(`📂 Categoría: ${categoriaId}`);
+      
+      const productos = await obtenerDatosSheet('Productos');
+      const productosCategoria = productos.filter(p => p.categoria_id == categoriaId && p.activo === 'SI');
+      
+      if (productosCategoria.length === 0) {
+        await ctx.reply('❌ No hay productos disponibles en esta categoría');
+        return;
+      }
+      
+      const categorias = await obtenerDatosSheet('Categorias');
+      const categoria = categorias.find(c => c.categoria_id == categoriaId);
+      const nombreCategoria = categoria ? categoria.categoria_nombre : 'Categoría';
+      
+      const keyboard = productosCategoria.map(producto => [{
+        text: `🛍️ ${producto.producto_nombre}`,
+        callback_data: `producto_${producto.producto_id}`
+      }]);
+      
+      keyboard.push([{ text: '🔍 Buscar producto', callback_data: `buscar_producto_${categoriaId}` }]);
+      keyboard.push([{ text: '📂 Ver categorías', callback_data: 'seguir_comprando' }]);
+      keyboard.push([{ text: '🛒 Ver carrito', callback_data: 'ver_carrito' }]);
+      
+      await ctx.editMessageText(`📂 Categoría: ${nombreCategoria}\n\n🛍️ Selecciona un producto:`, {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (callbackData.startsWith('producto_')) {
+      const productoId = parseInt(callbackData.split('_')[1]);
+      console.log(`🛍️ Producto: ${productoId}`);
+      
+      const productos = await obtenerDatosSheet('Productos');
+      const producto = productos.find(p => p.producto_id == productoId);
+      
+      if (!producto) {
+        await ctx.reply('❌ Producto no encontrado');
+        return;
+      }
+      
+      const userState = getUserState(userId);
+      const cliente = userState.cliente;
+      const precio = calcularPrecio(producto, cliente.lista || 1);
+      
+      const keyboard = [
+        [
+          { text: '1️⃣ x1', callback_data: `cantidad_${productoId}_1` },
+          { text: '2️⃣ x2', callback_data: `cantidad_${productoId}_2` },
+          { text: '3️⃣ x3', callback_data: `cantidad_${productoId}_3` }
+        ],
+        [
+          { text: '4️⃣ x4', callback_data: `cantidad_${productoId}_4` },
+          { text: '5️⃣ x5', callback_data: `cantidad_${productoId}_5` },
+          { text: '🔢 Otra cantidad', callback_data: `cantidad_custom_${productoId}` }
+        ],
+        [{ text: '🔙 Volver', callback_data: `categoria_${producto.categoria_id}` }]
+      ];
+      
+      await ctx.editMessageText(
+        `🛍️ ${producto.producto_nombre}\n💰 Precio: $${precio.toLocaleString()}\n\n¿Cuántas unidades?`,
+        { reply_markup: { inline_keyboard: keyboard } }
+      );
+      
+    } else if (callbackData.startsWith('cantidad_')) {
+      const parts = callbackData.split('_');
+      
+      if (parts[1] === 'custom') {
+        const productoId = parseInt(parts[2]);
+        setUserState(userId, { 
+          ...getUserState(userId), 
+          step: 'cantidad_custom', 
+          producto_id: productoId 
+        });
+        
+        await ctx.editMessageText('🔢 Escribe la cantidad que deseas:');
+        return;
+      }
+      
+      const productoId = parseInt(parts[1]);
+      const cantidad = parseInt(parts[2]);
+      
+      console.log(`📦 Carrito: +${cantidad} producto ${productoId}`);
+      
+      const productos = await obtenerDatosSheet('Productos');
+      const producto = productos.find(p => p.producto_id == productoId);
+      
+      if (!producto) {
+        await ctx.reply('❌ Producto no encontrado');
+        return;
+      }
+      
+      const userState = getUserState(userId);
+      const cliente = userState.cliente;
+      const precio = calcularPrecio(producto, cliente.lista || 1);
+      const importe = precio * cantidad;
+      
+      const cart = getUserCart(userId);
+      cart.push({
+        producto_id: productoId,
+        producto_nombre: producto.producto_nombre,
+        categoria_id: producto.categoria_id,
+        cantidad: cantidad,
+        precio_unitario: precio,
+        importe: importe
+      });
+      setUserCart(userId, cart);
+      
+      await ctx.reply(
+        `✅ Agregado al carrito:\n🛍️ ${producto.producto_nombre}\n📦 Cantidad: ${cantidad}\n💰 Subtotal: $${importe.toLocaleString()}\n\n¿Qué más necesitas?`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }],
+              [{ text: '🛒 Ver carrito', callback_data: 'ver_carrito' }],
+              [{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]
+            ]
+          }
+        }
+      );
+      
+    } else if (callbackData === 'ver_carrito') {
+      const cart = getUserCart(userId);
+      
+      if (cart.length === 0) {
+        await ctx.reply('🛒 Tu carrito está vacío', {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
+            ]
+          }
+        });
+        return;
+      }
+      
+      let mensaje = '🛒 *Tu carrito:*\n\n';
+      let total = 0;
+      
+      cart.forEach((item, index) => {
+        mensaje += `${index + 1}. *${item.producto_nombre}*\n`;
+        mensaje += `   📦 Cantidad: ${item.cantidad}\n`;
+        mensaje += `   💰 $${item.precio_unitario.toLocaleString()} c/u = $${item.importe.toLocaleString()}\n\n`;
+        total += item.importe;
+      });
+      
+      mensaje += `💰 *Total: $${total.toLocaleString()}*`;
+      
+      // Crear botones para eliminar productos individuales
+      const keyboard = [];
+      
+      // Agregar botón de eliminar para cada producto (máximo 10)
+      if (cart.length <= 10) {
+        cart.forEach((item, index) => {
+          keyboard.push([{
+            text: `🗑️ Eliminar: ${item.producto_nombre.substring(0, 25)}${item.producto_nombre.length > 25 ? '...' : ''}`,
+            callback_data: `eliminar_item_${index}`
+          }]);
+        });
+        
+        // Separador visual
+        keyboard.push([{ text: '── ACCIONES ──', callback_data: 'separator' }]);
+      }
+      
+      // Botones principales
+      keyboard.push([{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }]);
+      keyboard.push([{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]);
+      keyboard.push([{ text: '🗑️ Vaciar carrito', callback_data: 'vaciar_carrito' }]);
+      
+      await ctx.reply(mensaje, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (callbackData.startsWith('eliminar_item_')) {
+      const itemIndex = parseInt(callbackData.split('_')[2]);
+      const cart = getUserCart(userId);
+      
+      if (itemIndex < 0 || itemIndex >= cart.length) {
+        await ctx.reply('❌ Producto no encontrado en el carrito');
+        return;
+      }
+      
+      const itemEliminado = cart[itemIndex];
+      console.log(`🗑️ ${userName} elimina: ${itemEliminado.producto_nombre}`);
+      
+      // Eliminar el producto del carrito
+      cart.splice(itemIndex, 1);
+      setUserCart(userId, cart);
+      
+      if (cart.length === 0) {
+        await ctx.editMessageText('🗑️ Producto eliminado. Tu carrito está vacío.', {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
+            ]
+          }
+        });
+        return;
+      }
+      
+      // Mostrar carrito actualizado
+      let mensaje = '✅ Producto eliminado\n\n🛒 *Tu carrito actualizado:*\n\n';
+      let total = 0;
+      
+      cart.forEach((item, index) => {
+        mensaje += `${index + 1}. *${item.producto_nombre}*\n`;
+        mensaje += `   📦 Cantidad: ${item.cantidad}\n`;
+        mensaje += `   💰 $${item.precio_unitario.toLocaleString()} c/u = $${item.importe.toLocaleString()}\n\n`;
+        total += item.importe;
+      });
+      
+      mensaje += `💰 *Total: $${total.toLocaleString()}*`;
+      
+      // Crear botones actualizados
+      const keyboard = [];
+      
+      if (cart.length <= 10) {
+        cart.forEach((item, index) => {
+          keyboard.push([{
+            text: `🗑️ Eliminar: ${item.producto_nombre.substring(0, 25)}${item.producto_nombre.length > 25 ? '...' : ''}`,
+            callback_data: `eliminar_item_${index}`
+          }]);
+        });
+        
+        keyboard.push([{ text: '── ACCIONES ──', callback_data: 'separator' }]);
+      }
+      
+      keyboard.push([{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }]);
+      keyboard.push([{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]);
+      keyboard.push([{ text: '🗑️ Vaciar carrito', callback_data: 'vaciar_carrito' }]);
+      
+      await ctx.editMessageText(mensaje, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (callbackData === 'finalizar_pedido') {
+      const cart = getUserCart(userId);
+      
+      if (cart.length === 0) {
+        await ctx.reply('❌ Tu carrito está vacío');
+        return;
+      }
+      
+      // Preguntar por observaciones antes de finalizar
+      setUserState(userId, { 
+        ...getUserState(userId), 
+        step: 'pregunta_observacion' 
+      });
+      
+      await ctx.reply('📝 ¿Deseas agregar alguna observación al pedido?', {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '✅ Sí, agregar observación', callback_data: 'agregar_observacion' }],
+            [{ text: '❌ No, finalizar sin observación', callback_data: 'finalizar_sin_observacion' }]
+          ]
+        }
+      });
+      
+    } else if (callbackData === 'agregar_observacion') {
+      setUserState(userId, { 
+        ...getUserState(userId), 
+        step: 'escribir_observacion' 
+      });
+      
+      await ctx.reply('📝 Escribe tu observación para el pedido:');
+      
+    } else if (callbackData === 'finalizar_sin_observacion') {
+      await confirmarPedido(ctx, userId, '');
+      
+    } else if (callbackData === 'vaciar_carrito') {
+      setUserCart(userId, []);
+      await ctx.reply('🗑️ Carrito vaciado', {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
+          ]
+        }
+      });
+      
+    } else if (callbackData.startsWith('buscar_producto_')) {
+      const categoriaId = parseInt(callbackData.split('_')[2]);
+      setUserState(userId, { 
+        ...getUserState(userId), 
+        step: 'buscar_producto',
+        categoria_busqueda: categoriaId
+      });
+      await ctx.reply('🔍 Escribe el nombre del producto que buscas:');
     }
     
   } catch (error) {
@@ -251,9 +867,288 @@ bot.on('callback_query', async (ctx) => {
   }
 });
 
+// Manejo de mensajes de texto
+bot.on('text', async (ctx) => {
+  const userId = ctx.from.id;
+  const userName = ctx.from.first_name || 'Usuario';
+  const userState = getUserState(userId);
+  const text = ctx.message.text;
+  
+  console.log(`💬 Mensaje de ${userName}: "${text}" (Estado: ${userState.step})`);
+  
+  try {
+    if (userState.step === 'cantidad_custom') {
+      const cantidad = parseInt(text);
+      
+      if (isNaN(cantidad) || cantidad <= 0) {
+        await ctx.reply('❌ Por favor ingresa un número válido mayor a 0');
+        return;
+      }
+      
+      const productoId = userState.producto_id;
+      const productos = await obtenerDatosSheet('Productos');
+      const producto = productos.find(p => p.producto_id == productoId);
+      
+      if (!producto) {
+        await ctx.reply('❌ Producto no encontrado');
+        return;
+      }
+      
+      const cliente = userState.cliente;
+      const precio = calcularPrecio(producto, cliente.lista || 1);
+      const importe = precio * cantidad;
+      
+      const cart = getUserCart(userId);
+      cart.push({
+        producto_id: productoId,
+        producto_nombre: producto.producto_nombre,
+        categoria_id: producto.categoria_id,
+        cantidad: cantidad,
+        precio_unitario: precio,
+        importe: importe
+      });
+      setUserCart(userId, cart);
+      
+      setUserState(userId, { ...userState, step: 'seleccionar_categoria' });
+      
+      await ctx.reply(
+        `✅ Agregado al carrito:\n🛍️ ${producto.producto_nombre}\n📦 Cantidad: ${cantidad}\n💰 Subtotal: $${importe.toLocaleString()}\n\n¿Qué más necesitas?`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }],
+              [{ text: '🛒 Ver carrito', callback_data: 'ver_carrito' }],
+              [{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]
+            ]
+          }
+        }
+      );
+      
+    } else if (userState.step === 'buscar_cliente') {
+      const termino = text.toLowerCase().trim();
+      
+      if (termino.length < 2) {
+        await ctx.reply('❌ Escribe al menos 2 caracteres para buscar');
+        return;
+      }
+      
+      const clientes = await obtenerDatosSheet('Clientes');
+      const clientesFiltrados = clientes.filter(cliente => {
+        const nombre = (cliente.nombre || cliente.Nombre || '').toLowerCase();
+        return nombre.includes(termino);
+      });
+      
+      if (clientesFiltrados.length === 0) {
+        await ctx.reply(`❌ No se encontraron clientes con "${text}"`, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔍 Buscar de nuevo', callback_data: 'buscar_cliente' }],
+              [{ text: '👥 Ver todos los clientes', callback_data: 'hacer_pedido' }]
+            ]
+          }
+        });
+        return;
+      }
+      
+      const keyboard = clientesFiltrados.map(cliente => {
+        const nombreCliente = cliente.nombre || cliente.Nombre || `Cliente ${cliente.cliente_id}`;
+        const clienteId = cliente.cliente_id || cliente.Cliente_id || cliente.id;
+        
+        return [{
+          text: `👤 ${nombreCliente}`,
+          callback_data: `cliente_${clienteId}`
+        }];
+      });
+      
+      keyboard.push([{ text: '🔍 Buscar de nuevo', callback_data: 'buscar_cliente' }]);
+      keyboard.push([{ text: '👥 Ver todos', callback_data: 'hacer_pedido' }]);
+      
+      await ctx.reply(`🔍 Encontrados ${clientesFiltrados.length} cliente(s):`, {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (userState.step === 'buscar_producto') {
+      const termino = text.toLowerCase().trim();
+      
+      if (termino.length < 2) {
+        await ctx.reply('❌ Escribe al menos 2 caracteres para buscar');
+        return;
+      }
+      
+      const productos = await obtenerDatosSheet('Productos');
+      const categoriaId = userState.categoria_busqueda;
+      
+      const productosFiltrados = productos.filter(producto => {
+        const nombre = (producto.producto_nombre || '').toLowerCase();
+        const enCategoria = !categoriaId || producto.categoria_id == categoriaId;
+        const activo = producto.activo === 'SI';
+        return nombre.includes(termino) && enCategoria && activo;
+      });
+      
+      if (productosFiltrados.length === 0) {
+        await ctx.reply(`❌ No se encontraron productos con "${text}"`, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔍 Buscar de nuevo', callback_data: `buscar_producto_${categoriaId}` }],
+              [{ text: '📂 Ver categoría', callback_data: `categoria_${categoriaId}` }]
+            ]
+          }
+        });
+        return;
+      }
+      
+      const keyboard = productosFiltrados.map(producto => [{
+        text: `🛍️ ${producto.producto_nombre}`,
+        callback_data: `producto_${producto.producto_id}`
+      }]);
+      
+      const botonesBusquedaExitosa = categoriaId ? [
+        [{ text: '🔍 Buscar de nuevo', callback_data: `buscar_producto_${categoriaId}` }],
+        [{ text: '📂 Ver categoría', callback_data: `categoria_${categoriaId}` }]
+      ] : [
+        [{ text: '🔍 Buscar de nuevo', callback_data: 'buscar_producto_general' }],
+        [{ text: '📂 Ver categorías', callback_data: 'seguir_comprando' }]
+      ];
+      
+      keyboard.push(...botonesBusquedaExitosa);
+      
+      await ctx.reply(`🔍 Encontrados ${productosFiltrados.length} producto(s):`, {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (userState.step === 'escribir_observacion') {
+      const observacion = text.trim();
+      
+      if (observacion.length === 0) {
+        await ctx.reply('❌ Por favor escribe una observación válida o usa /start para cancelar');
+        return;
+      }
+      
+      if (observacion.length > 500) {
+        await ctx.reply('❌ La observación es muy larga. Máximo 500 caracteres.');
+        return;
+      }
+      
+      console.log(`📝 Observación de ${userName}: "${observacion}"`);
+      
+      // Confirmar pedido con observación
+      await confirmarPedido(ctx, userId, observacion);
+      
+    } else {
+      // Mensaje no reconocido
+      await ctx.reply(
+        '❓ No entiendo ese mensaje. Usa /start para comenzar o los botones del menú.',
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🏠 Menú principal', callback_data: 'start' }]
+            ]
+          }
+        }
+      );
+    }
+    
+  } catch (error) {
+    console.error('❌ Error procesando mensaje:', error);
+    await ctx.reply('❌ Ocurrió un error. Intenta nuevamente.');
+  }
+});
+
+// Función para confirmar pedido
+async function confirmarPedido(ctx, userId, observacion = '') {
+  try {
+    const userState = getUserState(userId);
+    const cart = getUserCart(userId);
+    const cliente = userState.cliente;
+    const pedidoId = userState.pedido_id;
+    
+    if (!cliente || cart.length === 0) {
+      await ctx.reply('❌ Error: No hay cliente o carrito vacío');
+      return;
+    }
+    
+    console.log(`✅ Confirmando pedido ${pedidoId} para ${cliente.nombre}${observacion ? ' con observación' : ''}`);
+    
+    // Calcular totales
+    const itemsTotal = cart.reduce((sum, item) => sum + item.cantidad, 0);
+    const montoTotal = cart.reduce((sum, item) => sum + item.importe, 0);
+    
+    // Crear pedido en Google Sheets
+    const fechaHora = new Date().toISOString();
+    
+    const pedidoData = [
+      pedidoId,
+      fechaHora,
+      cliente.cliente_id,
+      cliente.nombre,
+      itemsTotal,
+      montoTotal,
+      'PENDIENTE',
+      observacion
+    ];
+    
+    await agregarDatosSheet('Pedidos', pedidoData);
+    
+    // Crear detalles del pedido
+    for (let i = 0; i < cart.length; i++) {
+      const item = cart[i];
+      const detalleId = `${pedidoId}_${i + 1}`;
+      
+      const detalleData = [
+        detalleId,
+        pedidoId,
+        item.producto_id,
+        item.producto_nombre,
+        item.categoria_id,
+        item.cantidad,
+        item.precio_unitario,
+        item.importe
+      ];
+      
+      await agregarDatosSheet('DetallePedidos', detalleData);
+    }
+    
+    // Limpiar estado del usuario
+    setUserState(userId, { step: 'idle' });
+    setUserCart(userId, []);
+    
+    // Mensaje de confirmación
+    let mensaje = `✅ *Pedido registrado*\n\n`;
+    mensaje += `📋 ID: ${pedidoId}\n`;
+    mensaje += `👤 Cliente: ${cliente.nombre}\n`;
+    mensaje += `📅 Fecha: ${new Date().toLocaleString()}\n`;
+    mensaje += `📦 Items: ${itemsTotal}\n`;
+    mensaje += `💰 Total: $${montoTotal.toLocaleString()}\n\n`;
+    
+    if (observacion) {
+      mensaje += `📝 Observación: ${observacion}\n\n`;
+    }
+    
+    mensaje += `⏳ Estado: PENDIENTE\n\n`;
+    mensaje += `🎉 ¡Pedido registrado exitosamente!`;
+    
+    await ctx.reply(mensaje, {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🛒 Nuevo pedido', callback_data: 'hacer_pedido' }],
+          [{ text: '🏠 Menú principal', callback_data: 'start' }]
+        ]
+      }
+    });
+    
+    console.log(`✅ Pedido ${pedidoId} guardado exitosamente`);
+    
+  } catch (error) {
+    console.error('❌ Error confirmando pedido:', error);
+    await ctx.reply('❌ Error al confirmar el pedido. Intenta nuevamente.');
+  }
+}
+
 // Configurar webhook
 app.post('/webhook', (req, res) => {
   try {
+    console.log('📨 Webhook recibido');
     bot.handleUpdate(req.body);
     res.status(200).send('OK');
   } catch (error) {
@@ -262,13 +1157,16 @@ app.post('/webhook', (req, res) => {
   }
 });
 
-// API Routes
+// API Routes básicas
 app.get('/health', (req, res) => {
   res.json({
     status: 'OK',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    port: PORT
+    port: PORT,
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    version: process.version
   });
 });
 
@@ -280,15 +1178,32 @@ app.get('/api/info', (req, res) => {
     features: [
       'Bot de Telegram',
       'Integración Google Sheets',
-      'Sistema de pedidos'
+      'Sistema de pedidos',
+      'Carrito de compras',
+      'Métricas de productos',
+      'Carga de CSV'
+    ],
+    endpoints: [
+      'GET /api/clientes',
+      'GET /api/productos', 
+      'GET /api/categorias',
+      'GET /api/pedidos',
+      'GET /api/detalles-pedidos',
+      'GET /api/pedidos-completos',
+      'GET /api/metricas',
+      'POST /api/actualizar-metricas',
+      'POST /api/upload-clientes-csv',
+      'POST /api/upload-productos-csv',
+      'PUT /api/pedidos/:id/estado'
     ]
   });
 });
 
+// API Routes para datos
 app.get('/api/clientes', async (req, res) => {
   try {
     const clientes = await obtenerDatosSheet('Clientes');
-    res.json({ success: true, clientes });
+    res.json({ success: true, clientes, total: clientes.length });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -297,7 +1212,25 @@ app.get('/api/clientes', async (req, res) => {
 app.get('/api/productos', async (req, res) => {
   try {
     const productos = await obtenerDatosSheet('Productos');
-    res.json({ success: true, productos });
+    res.json({ success: true, productos, total: productos.length });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/categorias', async (req, res) => {
+  try {
+    const categorias = await obtenerDatosSheet('Categorias');
+    res.json({ success: true, categorias, total: categorias.length });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/pedidos', async (req, res) => {
+  try {
+    const pedidos = await obtenerDatosSheet('Pedidos');
+    res.json({ success: true, pedidos, total: pedidos.length });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -306,7 +1239,7 @@ app.get('/api/productos', async (req, res) => {
 app.get('/api/detalles-pedidos', async (req, res) => {
   try {
     const detalles = await obtenerDatosSheet('DetallePedidos');
-    res.json({ success: true, detalles });
+    res.json({ success: true, detalles, total: detalles.length });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -316,23 +1249,28 @@ app.get('/api/pedidos-completos', async (req, res) => {
   try {
     console.log('📊 Obteniendo pedidos completos...');
     
+    // Obtener datos de ambas hojas
     const pedidos = await obtenerDatosSheet('Pedidos');
     const detalles = await obtenerDatosSheet('DetallePedidos');
     
     console.log(`📋 Pedidos: ${pedidos.length}, Detalles: ${detalles.length}`);
     
+    // Combinar pedidos con sus detalles
     const pedidosCompletos = pedidos.map(pedido => {
       const pedidoId = pedido.pedido_id;
       
+      // Encontrar todos los detalles de este pedido
       const detallesPedido = detalles.filter(detalle => 
         detalle.pedido_id === pedidoId
       );
       
+      // Calcular total desde los detalles si no existe o es incorrecto
       const totalCalculado = detallesPedido.reduce((sum, detalle) => {
         const importe = parseFloat(detalle.importe) || 0;
         return sum + importe;
       }, 0);
       
+      // Usar el total calculado si el total del pedido no existe o es 0
       const totalFinal = parseFloat(pedido.total) || totalCalculado;
       
       return {
@@ -344,6 +1282,7 @@ app.get('/api/pedidos-completos', async (req, res) => {
       };
     });
     
+    // Ordenar por fecha más reciente primero
     pedidosCompletos.sort((a, b) => {
       const fechaA = new Date(a.fecha_hora || 0);
       const fechaB = new Date(b.fecha_hora || 0);
@@ -365,6 +1304,215 @@ app.get('/api/pedidos-completos', async (req, res) => {
   }
 });
 
+// API Routes para métricas
+app.get('/api/metricas', async (req, res) => {
+  try {
+    console.log('📊 Obteniendo métricas...');
+    
+    const metricas = await calcularMetricas();
+    
+    // Calcular estadísticas generales
+    const totalProductos = metricas.length;
+    const productosVendidos = metricas.filter(m => m.cantidad_vendida > 0).length;
+    const ingresosTotales = metricas.reduce((sum, m) => sum + m.ingresos_totales, 0);
+    const gananciaTotal = metricas.reduce((sum, m) => sum + m.ganancia_total_estimada, 0);
+    const rentabilidadPromedio = ingresosTotales > 0 ? (gananciaTotal / ingresosTotales) * 100 : 0;
+    
+    // Top 10 productos más vendidos
+    const topVentas = metricas
+      .filter(m => m.cantidad_vendida > 0)
+      .sort((a, b) => b.cantidad_vendida - a.cantidad_vendida)
+      .slice(0, 10);
+    
+    // Top 10 productos más rentables
+    const topRentabilidad = metricas
+      .filter(m => m.ingresos_totales > 0)
+      .sort((a, b) => b.ganancia_total_estimada - a.ganancia_total_estimada)
+      .slice(0, 10);
+    
+    // Métricas por categoría
+    const metricasPorCategoria = {};
+    metricas.forEach(metrica => {
+      const categoria = metrica.categoria_nombre;
+      if (!metricasPorCategoria[categoria]) {
+        metricasPorCategoria[categoria] = {
+          categoria_nombre: categoria,
+          productos_total: 0,
+          productos_vendidos: 0,
+          cantidad_vendida: 0,
+          ingresos_totales: 0,
+          ganancia_total: 0
+        };
+      }
+      
+      metricasPorCategoria[categoria].productos_total++;
+      if (metrica.cantidad_vendida > 0) {
+        metricasPorCategoria[categoria].productos_vendidos++;
+      }
+      metricasPorCategoria[categoria].cantidad_vendida += metrica.cantidad_vendida;
+      metricasPorCategoria[categoria].ingresos_totales += metrica.ingresos_totales;
+      metricasPorCategoria[categoria].ganancia_total += metrica.ganancia_total_estimada;
+    });
+    
+    const categorias = Object.values(metricasPorCategoria)
+      .sort((a, b) => b.ingresos_totales - a.ingresos_totales);
+    
+    res.json({
+      success: true,
+      resumen: {
+        total_productos: totalProductos,
+        productos_vendidos: productosVendidos,
+        ingresos_totales: Math.round(ingresosTotales),
+        ganancia_total: Math.round(gananciaTotal),
+        rentabilidad_promedio: Math.round(rentabilidadPromedio * 100) / 100
+      },
+      productos: metricas,
+      top_ventas: topVentas,
+      top_rentabilidad: topRentabilidad,
+      categorias: categorias,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Error obteniendo métricas:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/actualizar-metricas', async (req, res) => {
+  try {
+    console.log('🔄 Actualizando métricas...');
+    
+    const resultado = await actualizarHojaMetricas();
+    
+    if (resultado) {
+      res.json({
+        success: true,
+        message: 'Métricas actualizadas exitosamente',
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'No se pudieron actualizar las métricas'
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error actualizando métricas:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Endpoint para actualizar estado del pedido (con middleware JSON específico)
+app.put('/api/pedidos/:pedidoId/estado', express.json({ limit: '10mb' }), async (req, res) => {
+  try {
+    const { pedidoId } = req.params;
+    const { estado } = req.body;
+    
+    console.log(`🔄 Actualizando pedido ${pedidoId} a estado: ${estado}`);
+    
+    if (!pedidoId || !estado) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'pedidoId y estado son requeridos' 
+      });
+    }
+    
+    // Validar estados permitidos
+    const estadosPermitidos = ['PENDIENTE', 'CONFIRMADO', 'CANCELADO'];
+    if (!estadosPermitidos.includes(estado.toUpperCase())) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Estado no válido. Debe ser: PENDIENTE, CONFIRMADO o CANCELADO' 
+      });
+    }
+    
+    if (!SPREADSHEET_ID) {
+      console.log(`⚠️ Google Sheets no configurado, simulando actualización`);
+      return res.json({ 
+        success: true, 
+        message: `Estado simulado actualizado a ${estado}`,
+        pedido_id: pedidoId,
+        nuevo_estado: estado
+      });
+    }
+    
+    // Obtener todos los pedidos
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Pedidos!A:Z',
+    });
+    
+    const rows = response.data.values || [];
+    if (rows.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'No se encontraron pedidos' 
+      });
+    }
+    
+    const headers = rows[0];
+    const estadoColumnIndex = headers.findIndex(header => 
+      header.toLowerCase() === 'estado'
+    );
+    
+    if (estadoColumnIndex === -1) {
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Columna estado no encontrada' 
+      });
+    }
+    
+    // Buscar la fila del pedido
+    let filaEncontrada = -1;
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === pedidoId) {
+        filaEncontrada = i;
+        break;
+      }
+    }
+    
+    if (filaEncontrada === -1) {
+      return res.status(404).json({ 
+        success: false, 
+        error: `Pedido ${pedidoId} no encontrado` 
+      });
+    }
+    
+    // Actualizar el estado en Google Sheets
+    const estadoColumn = String.fromCharCode(65 + estadoColumnIndex);
+    const range = `Pedidos!${estadoColumn}${filaEncontrada + 1}`;
+    
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: range,
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: [[estado.toUpperCase()]]
+      }
+    });
+    
+    console.log(`✅ Pedido ${pedidoId} actualizado a ${estado}`);
+    
+    res.json({ 
+      success: true, 
+      message: `Estado actualizado exitosamente`,
+      pedido_id: pedidoId,
+      nuevo_estado: estado.toUpperCase(),
+      fila_actualizada: filaEncontrada + 1
+    });
+    
+  } catch (error) {
+    console.error('❌ Error actualizando estado:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Endpoint para cargar CSV de clientes (SIN middleware JSON global)
 app.post('/api/upload-clientes-csv', upload.single('csvFile'), async (req, res) => {
   try {
     console.log('📤 Recibiendo archivo CSV de clientes...');
@@ -376,55 +1524,73 @@ app.post('/api/upload-clientes-csv', upload.single('csvFile'), async (req, res) 
       });
     }
     
+    console.log(`📄 Archivo recibido: ${req.file.originalname} (${req.file.size} bytes)`);
+    
     const csvContent = req.file.buffer.toString('utf8');
-    console.log('📄 Contenido CSV recibido, parseando...');
+    console.log('📄 Parseando contenido CSV...');
     
-    const records = parse(csvContent, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true
-    });
+    // Parse CSV manualmente (simple)
+    const lines = csvContent.split('\n').filter(line => line.trim());
     
-    console.log(`📊 ${records.length} registros parseados`);
-    
-    if (records.length === 0) {
+    if (lines.length < 2) {
       return res.status(400).json({
         success: false,
-        error: 'El archivo CSV está vacío o no tiene el formato correcto'
+        error: 'El archivo CSV debe tener al menos una fila de encabezados y una fila de datos'
       });
     }
     
+    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    console.log('📋 Encabezados encontrados:', headers);
+    
     let insertados = 0;
     let errores = 0;
+    const erroresDetalle = [];
     
-    for (const record of records) {
+    for (let i = 1; i < lines.length; i++) {
       try {
-        if (!record.cliente_id || !record.nombre) {
-          console.log('⚠️ Registro incompleto:', record);
+        const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+        
+        if (values.length < headers.length) {
           errores++;
+          erroresDetalle.push(`Fila ${i + 1}: Datos incompletos`);
           continue;
         }
         
+        // Crear objeto cliente
+        const cliente = {};
+        headers.forEach((header, index) => {
+          cliente[header] = values[index] || '';
+        });
+        
+        // Validar datos mínimos
+        if (!cliente.cliente_id || !cliente.nombre) {
+          errores++;
+          erroresDetalle.push(`Fila ${i + 1}: cliente_id o nombre faltante`);
+          continue;
+        }
+        
+        // Preparar datos para Google Sheets
         const clienteData = [
-          record.cliente_id,
-          record.nombre,
-          record.lista || 1,
-          record.localidad || 'Sin localidad'
+          cliente.cliente_id,
+          cliente.nombre,
+          cliente.lista || '1',
+          cliente.localidad || ''
         ];
         
         const resultado = await agregarDatosSheet('Clientes', clienteData);
         
         if (resultado) {
           insertados++;
-          console.log(`✅ Cliente insertado: ${record.nombre}`);
+          console.log(`✅ Cliente insertado: ${cliente.nombre}`);
         } else {
           errores++;
-          console.log(`❌ Error insertando: ${record.nombre}`);
+          erroresDetalle.push(`Fila ${i + 1}: Error al insertar ${cliente.nombre}`);
         }
         
       } catch (error) {
-        console.error(`❌ Error procesando registro:`, error);
+        console.error(`❌ Error procesando fila ${i + 1}:`, error);
         errores++;
+        erroresDetalle.push(`Fila ${i + 1}: ${error.message}`);
       }
     }
     
@@ -432,14 +1598,15 @@ app.post('/api/upload-clientes-csv', upload.single('csvFile'), async (req, res) 
     
     res.json({
       success: true,
-      message: `Clientes cargados exitosamente`,
+      message: `Clientes procesados exitosamente`,
       insertados: insertados,
       errores: errores,
-      total: records.length
+      total: lines.length - 1,
+      errores_detalle: erroresDetalle.slice(0, 10) // Solo primeros 10 errores
     });
     
   } catch (error) {
-    console.error('❌ Error procesando CSV:', error);
+    console.error('❌ Error procesando CSV de clientes:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -447,6 +1614,7 @@ app.post('/api/upload-clientes-csv', upload.single('csvFile'), async (req, res) 
   }
 });
 
+// Endpoint para cargar CSV de productos (SIN middleware JSON global)
 app.post('/api/upload-productos-csv', upload.single('csvFile'), async (req, res) => {
   try {
     console.log('📤 Recibiendo archivo CSV de productos...');
@@ -458,56 +1626,80 @@ app.post('/api/upload-productos-csv', upload.single('csvFile'), async (req, res)
       });
     }
     
+    console.log(`📄 Archivo recibido: ${req.file.originalname} (${req.file.size} bytes)`);
+    
     const csvContent = req.file.buffer.toString('utf8');
-    console.log('📄 Contenido CSV recibido, parseando...');
+    console.log('📄 Parseando contenido CSV...');
     
-    const records = parse(csvContent, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true
-    });
+    // Parse CSV manualmente (simple)
+    const lines = csvContent.split('\n').filter(line => line.trim());
     
-    console.log(`📊 ${records.length} registros parseados`);
-    
-    if (records.length === 0) {
+    if (lines.length < 2) {
       return res.status(400).json({
         success: false,
-        error: 'El archivo CSV está vacío o no tiene el formato correcto'
+        error: 'El archivo CSV debe tener al menos una fila de encabezados y una fila de datos'
       });
     }
     
+    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    console.log('📋 Encabezados encontrados:', headers);
+    
     let insertados = 0;
     let errores = 0;
+    const erroresDetalle = [];
     
-    for (const record of records) {
+    for (let i = 1; i < lines.length; i++) {
       try {
-        if (!record.producto_id || !record.producto_nombre) {
-          console.log('⚠️ Registro incompleto:', record);
+        const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+        
+        if (values.length < headers.length) {
           errores++;
+          erroresDetalle.push(`Fila ${i + 1}: Datos incompletos`);
           continue;
         }
         
+        // Crear objeto producto
+        const producto = {};
+        headers.forEach((header, index) => {
+          producto[header] = values[index] || '';
+        });
+        
+        // Validar datos mínimos
+        if (!producto.producto_id || !producto.producto_nombre) {
+          errores++;
+          erroresDetalle.push(`Fila ${i + 1}: producto_id o producto_nombre faltante`);
+          continue;
+        }
+        
+        // Preparar datos para Google Sheets (estructura completa)
         const productoData = [
-          record.producto_id,
-          record.categoria_id || 1,
-          record.producto_nombre,
-          record.precio || 0,
-          record.activo || 'SI'
+          producto.producto_id,
+          producto.categoria_id || '',
+          producto.producto_nombre,
+          producto.precio1 || producto.precio || '',
+          producto.precio2 || '',
+          producto.precio3 || '',
+          producto.precio4 || '',
+          producto.precio5 || '',
+          producto.activo || 'SI',
+          producto.proveedor_id || '',
+          producto.proveedor_nombre || ''
         ];
         
         const resultado = await agregarDatosSheet('Productos', productoData);
         
         if (resultado) {
           insertados++;
-          console.log(`✅ Producto insertado: ${record.producto_nombre}`);
+          console.log(`✅ Producto insertado: ${producto.producto_nombre}`);
         } else {
           errores++;
-          console.log(`❌ Error insertando: ${record.producto_nombre}`);
+          erroresDetalle.push(`Fila ${i + 1}: Error al insertar ${producto.producto_nombre}`);
         }
         
       } catch (error) {
-        console.error(`❌ Error procesando registro:`, error);
+        console.error(`❌ Error procesando fila ${i + 1}:`, error);
         errores++;
+        erroresDetalle.push(`Fila ${i + 1}: ${error.message}`);
       }
     }
     
@@ -515,14 +1707,15 @@ app.post('/api/upload-productos-csv', upload.single('csvFile'), async (req, res)
     
     res.json({
       success: true,
-      message: `Productos cargados exitosamente`,
+      message: `Productos procesados exitosamente`,
       insertados: insertados,
       errores: errores,
-      total: records.length
+      total: lines.length - 1,
+      errores_detalle: erroresDetalle.slice(0, 10) // Solo primeros 10 errores
     });
     
   } catch (error) {
-    console.error('❌ Error procesando CSV:', error);
+    console.error('❌ Error procesando CSV de productos:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -530,15 +1723,176 @@ app.post('/api/upload-productos-csv', upload.single('csvFile'), async (req, res)
   }
 });
 
+// Endpoint para configurar webhook automáticamente
+app.post('/api/setup-webhook', async (req, res) => {
+  try {
+    const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+    const RAILWAY_STATIC_URL = process.env.RAILWAY_STATIC_URL;
+    
+    if (!TELEGRAM_BOT_TOKEN) {
+      return res.status(400).json({
+        success: false,
+        error: 'TELEGRAM_BOT_TOKEN no configurado'
+      });
+    }
+    
+    if (!RAILWAY_STATIC_URL) {
+      return res.status(400).json({
+        success: false,
+        error: 'RAILWAY_STATIC_URL no disponible'
+      });
+    }
+    
+    const webhookUrl = `${RAILWAY_STATIC_URL}/webhook`;
+    const apiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
+    
+    console.log(`🔧 Configurando webhook: ${webhookUrl}`);
+    
+    const response = await fetch(`${apiUrl}/setWebhook`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        url: webhookUrl,
+        allowed_updates: ["message", "callback_query"],
+        drop_pending_updates: true
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (result.ok) {
+      console.log('✅ Webhook configurado exitosamente');
+      
+      res.json({
+        success: true,
+        message: 'Webhook configurado exitosamente',
+        webhook_url: webhookUrl
+      });
+    } else {
+      console.error(`❌ Error configurando webhook: ${result.description}`);
+      res.status(500).json({
+        success: false,
+        error: `Error de Telegram: ${result.description}`
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error configurando webhook:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Endpoint de test para Google Sheets
+app.get('/api/test/sheets', async (req, res) => {
+  try {
+    if (!SPREADSHEET_ID) {
+      return res.json({
+        success: false,
+        error: 'Google Sheets no configurado',
+        configurado: false
+      });
+    }
+    
+    console.log('🧪 Probando conexión a Google Sheets...');
+    
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    const hojas = spreadsheet.data.sheets?.map(sheet => ({
+      nombre: sheet.properties?.title,
+      id: sheet.properties?.sheetId
+    })) || [];
+    
+    // Probar lectura de cada hoja
+    const datosHojas = {};
+    for (const hoja of hojas) {
+      try {
+        const datos = await obtenerDatosSheet(hoja.nombre);
+        datosHojas[hoja.nombre] = {
+          registros: datos.length,
+          muestra: datos.slice(0, 3) // Primeros 3 registros como muestra
+        };
+      } catch (error) {
+        datosHojas[hoja.nombre] = {
+          error: error.message
+        };
+      }
+    }
+    
+    res.json({
+      success: true,
+      configurado: true,
+      spreadsheet: {
+        titulo: spreadsheet.data.properties?.title,
+        id: SPREADSHEET_ID,
+        hojas: hojas
+      },
+      datos: datosHojas,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Error probando Google Sheets:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      configurado: false
+    });
+  }
+});
+
+// Ruta principal - redirigir al dashboard
+app.get('/', (req, res) => {
+  res.redirect('/dashboard.html');
+});
+
 // Iniciar servidor
 app.listen(PORT, () => {
   console.log(`🚀 Servidor iniciado en puerto ${PORT}`);
-  console.log(`🌐 Dashboard: http://localhost:${PORT}`);
-  console.log(`🤖 Bot de Telegram configurado`);
-  console.log(`📊 Google
-  )
-}
-)
-  )
-}
-)
+  console.log(`🌐 Dashboard: http://localhost:${PORT}/dashboard.html`);
+  console.log(`🤖 Bot de Telegram: ${process.env.TELEGRAM_BOT_TOKEN ? 'Configurado' : 'No configurado'}`);
+  console.log(`📊 Google Sheets: ${SPREADSHEET_ID ? 'Configurado' : 'No configurado'}`);
+  console.log('');
+  console.log('📋 Endpoints disponibles:');
+  console.log('   GET  /health');
+  console.log('   GET  /api/info');
+  console.log('   GET  /api/clientes');
+  console.log('   GET  /api/productos');
+  console.log('   GET  /api/categorias');
+  console.log('   GET  /api/pedidos');
+  console.log('   GET  /api/detalles-pedidos');
+  console.log('   GET  /api/pedidos-completos');
+  console.log('   GET  /api/metricas');
+  console.log('   POST /api/actualizar-metricas');
+  console.log('   POST /api/upload-clientes-csv');
+  console.log('   POST /api/upload-productos-csv');
+  console.log('   POST /api/setup-webhook');
+  console.log('   GET  /api/test/sheets');
+  console.log('   PUT  /api/pedidos/:id/estado');
+});
+
+// Manejo de errores
+process.on('uncaughtException', (error) => {
+  console.error('❌ Error no capturado:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Promesa rechazada no manejada:', reason);
+});
+
+// Graceful shutdown para Railway
+process.on('SIGTERM', () => {
+  console.log('🛑 SIGTERM recibido, cerrando servidor...');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('🛑 SIGINT recibido, cerrando servidor...');
+  process.exit(0);
+});

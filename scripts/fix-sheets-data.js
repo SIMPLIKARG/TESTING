@@ -21,66 +21,6 @@ const auth = new GoogleAuth({
 
 const sheets = google.sheets({ version: 'v4', auth });
 
-// Función para normalizar números (convertir comas a puntos y limpiar formato)
-function normalizarNumero(valor) {
-  if (valor === '' || valor === null || valor === undefined || valor === 'null' || valor === 'undefined') {
-    return 0;
-  }
-  
-  // Convertir a string para procesamiento
-  let valorStr = String(valor).trim();
-  
-  // Si ya es un número válido, devolverlo
-  if (!isNaN(valorStr) && !isNaN(parseFloat(valorStr))) {
-    return parseFloat(valorStr);
-  }
-  
-  // Limpiar el formato de números:
-  // - Remover espacios
-  // - Reemplazar comas por puntos (formato decimal argentino -> estadounidense)
-  // - Remover caracteres no numéricos excepto puntos y signos negativos
-  valorStr = valorStr
-    .replace(/\s/g, '') // Remover espacios
-    .replace(/,/g, '.') // Reemplazar comas por puntos
-    .replace(/[^\d.-]/g, ''); // Mantener solo dígitos, puntos y signos negativos
-  
-  // Convertir a número
-  const numero = parseFloat(valorStr);
-  
-  // Si no es un número válido, devolver 0
-  return isNaN(numero) ? 0 : numero;
-}
-
-// Función para procesar datos de productos y reemplazar celdas vacías con 0
-function procesarProductosParaSheets(datos) {
-  const columnasNumericas = ['producto_id', 'categoria_id', 'precio1', 'precio2', 'precio3', 'precio4', 'precio5'];
-  
-  return datos.map((fila, filaIndex) => {
-    if (filaIndex === 0) {
-      // Es la fila de encabezados, no procesarla
-      return fila;
-    }
-    
-    return fila.map((celda, columnaIndex) => {
-      // Obtener el nombre de la columna desde la primera fila (encabezados)
-      const nombreColumna = datos[0][columnaIndex];
-      
-      // Si esta columna debe ser numérica
-      if (columnasNumericas.includes(nombreColumna)) {
-        return normalizarNumero(celda);
-      }
-      
-      // Para columnas no numéricas, mantener el valor original
-      // pero convertir null/undefined a string vacío
-      if (celda === null || celda === undefined) {
-        return '';
-      }
-      
-      return celda;
-    });
-  });
-}
-
 // Datos de productos de ejemplo (estructura similar a tu CSV)
 const productosEjemplo = [
   ['producto_id', 'categoria_id', 'producto_nombre', 'precio1', 'precio2', 'precio3', 'precio4', 'precio5', 'activo'],
@@ -173,16 +113,12 @@ async function poblarProductos() {
     
     // Insertar datos de productos
     console.log(`📦 Insertando ${productosEjemplo.length - 1} productos...`);
-    
-    // Procesar datos para reemplazar celdas vacías con 0
-    const productosProcessados = procesarProductosParaSheets(productosEjemplo);
-    
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Productos!A1',
-      valueInputOption: 'USER_ENTERED',
+      valueInputOption: 'RAW',
       requestBody: {
-        values: productosProcessados
+        values: productosEjemplo
       }
     });
     

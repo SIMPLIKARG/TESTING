@@ -16,58 +16,12 @@
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             color: #333;
-        }
-
-        .sidebar {
-            position: fixed;
-            left: 0;
-            top: 0;
-            width: 250px;
-            height: 100vh;
-            background: rgba(44, 62, 80, 0.95);
-            backdrop-filter: blur(10px);
-            color: white;
             padding: 20px;
-            overflow-y: auto;
-            z-index: 1000;
         }
 
-        .sidebar h2 {
-            margin-bottom: 30px;
-            font-size: 1.5rem;
-            text-align: center;
-            color: #ecf0f1;
-        }
-
-        .nav-item {
-            display: block;
-            padding: 15px 20px;
-            margin: 5px 0;
-            background: rgba(52, 73, 94, 0.7);
-            border: none;
-            border-radius: 8px;
-            color: white;
-            text-decoration: none;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            width: 100%;
-            text-align: left;
-            font-size: 0.95rem;
-        }
-
-        .nav-item:hover {
-            background: rgba(52, 152, 219, 0.8);
-            transform: translateX(5px);
-        }
-
-        .nav-item.active {
-            background: #3498db;
-        }
-
-        .main-content {
-            margin-left: 250px;
-            padding: 30px;
-            min-height: 100vh;
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
         }
 
         .header {
@@ -76,73 +30,36 @@
             padding: 30px;
             margin-bottom: 30px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            text-align: center;
         }
 
         .header h1 {
             color: #2c3e50;
             font-size: 2.5rem;
+            margin-bottom: 10px;
             font-weight: 700;
         }
 
-        .btn {
-            padding: 12px 24px;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            background: #3498db;
-            color: white;
-            margin: 0 5px;
+        .header p {
+            color: #7f8c8d;
+            font-size: 1.1rem;
         }
 
-        .btn:hover {
-            background: #2980b9;
-            transform: translateY(-2px);
-        }
-
-        .btn.success {
-            background: #27ae60;
-        }
-
-        .btn.success:hover {
-            background: #229954;
-        }
-
-        .btn.danger {
-            background: #e74c3c;
-        }
-
-        .btn.danger:hover {
-            background: #c0392b;
-        }
-
-        .content-section {
+        .table-container {
             background: white;
             border-radius: 15px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.1);
             overflow: hidden;
-            margin-bottom: 30px;
         }
 
-        .section-header {
+        .table-header {
             background: #2c3e50;
             color: white;
             padding: 25px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            text-align: center;
         }
 
-        .section-content {
-            padding: 30px;
-        }
-
-        .table-container {
+        .table-content {
             overflow-x: auto;
             max-height: 600px;
             overflow-y: auto;
@@ -191,6 +108,24 @@
             text-align: center;
         }
 
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #3498db;
+            color: white;
+            margin: 10px;
+        }
+
+        .btn:hover {
+            background: #2980b9;
+            transform: translateY(-2px);
+        }
+
         .precio {
             text-align: right;
             font-weight: 600;
@@ -203,549 +138,143 @@
             color: #7f8c8d;
         }
 
-        .estado {
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
+        .detalle-id {
             font-weight: 600;
-            text-transform: uppercase;
+            color: #3498db;
         }
 
-        .estado.pendiente {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .estado.confirmado {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .estado.cancelado {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .upload-area {
-            border: 2px dashed #bdc3c7;
-            border-radius: 10px;
-            padding: 40px;
-            text-align: center;
-            margin: 20px 0;
-            transition: all 0.3s ease;
-        }
-
-        .upload-area:hover {
-            border-color: #3498db;
-            background: #f8f9fa;
-        }
-
-        .upload-area.dragover {
-            border-color: #27ae60;
-            background: #d5f4e6;
-        }
-
-        .file-input {
-            display: none;
-        }
-
-        .upload-btn {
-            background: #3498db;
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 1rem;
-            margin: 10px;
-        }
-
-        .upload-btn:hover {
-            background: #2980b9;
-        }
-
-        .hidden {
-            display: none;
+        .pedido-id {
+            font-weight: 600;
+            color: #9b59b6;
         }
 
         @media (max-width: 768px) {
-            .sidebar {
-                transform: translateX(-100%);
-                transition: transform 0.3s ease;
+            body {
+                padding: 10px;
             }
             
-            .sidebar.active {
-                transform: translateX(0%);
-            }
-
-            .main-content {
-                margin-left: 0;
-            }
-
-            .header {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-
             .header h1 {
-                margin-bottom: 15px;
+                font-size: 2rem;
             }
-
-            .btn {
-                width: 100%;
-                margin: 5px 0;
+            
+            table {
+                font-size: 0.8rem;
+            }
+            
+            th, td {
+                padding: 8px 6px;
             }
         }
     </style>
 </head>
 <body>
-    <div class="sidebar">
-        <h2>Distribuidora</h2>
-        <button class="nav-item active" data-target="pedidos-pendientes">Pedidos Pendientes</button>
-        <button class="nav-item" data-target="todos-los-pedidos">Todos los Pedidos</button>
-        <button class="nav-item" data-target="pedidos-confirmados">Pedidos Confirmados</button>
-        <button class="nav-item" data-target="metricas">Métricas</button>
-        <hr style="border-color: rgba(255,255,255,0.2); margin: 20px 0;">
-        <button class="nav-item" id="toggleDarkMode">Modo Oscuro</button>
-        <button class="nav-item" data-target="cargar-clientes">Cargar Clientes</button>
-        <button class="nav-item" data-target="cargar-productos">Cargar Productos</button>
-    </div>
-
-    <div class="main-content">
+    <div class="container">
         <div class="header">
-            <h1 id="pageTitle">Pedidos Pendientes</h1>
-            <div>
-                <button class="btn" id="refreshButton">🔄 Actualizar</button>
-                <button class="btn" id="printButton">🖨️ Imprimir</button>
-            </div>
+            <h1>📋 Dashboard Distribuidora</h1>
+            <p>Detalle de Pedidos - Sistema completo</p>
+            <button class="btn" onclick="cargarDatos()">🔄 Cargar Datos</button>
         </div>
 
-        <div id="pedidos-pendientes" class="content-section">
-            <div class="section-header">
-                <h2>Pedidos Pendientes</h2>
+        <div class="table-container">
+            <div class="table-header">
+                <h2>📊 DetallePedidos</h2>
             </div>
-            <div class="section-content">
-                <div class="table-container" id="pedidosPendientesTable">
-                    <div class="loading">🔄 Cargando pedidos pendientes...</div>
-                </div>
-            </div>
-        </div>
-
-        <div id="todos-los-pedidos" class="content-section hidden">
-            <div class="section-header">
-                <h2>Todos los Pedidos</h2>
-            </div>
-            <div class="section-content">
-                <div class="table-container" id="todosLosPedidosTable">
-                    <div class="loading">🔄 Cargando todos los pedidos...</div>
-                </div>
-            </div>
-        </div>
-
-        <div id="pedidos-confirmados" class="content-section hidden">
-            <div class="section-header">
-                <h2>Pedidos Confirmados</h2>
-            </div>
-            <div class="section-content">
-                <div class="table-container" id="pedidosConfirmadosTable">
-                    <div class="loading">🔄 Cargando pedidos confirmados...</div>
-                </div>
-            </div>
-        </div>
-
-        <div id="metricas" class="content-section hidden">
-            <div class="section-header">
-                <h2>Métricas</h2>
-            </div>
-            <div class="section-content">
-                <p>Contenido de Métricas</p>
-            </div>
-        </div>
-
-        <div id="cargar-clientes" class="content-section hidden">
-            <div class="section-header">
-                <h2>Cargar Clientes (CSV)</h2>
-            </div>
-            <div class="section-content">
-                <div class="upload-area" id="uploadAreaClientes">
-                    <p>Arrastra y suelta tu archivo CSV de clientes aquí, o haz clic para seleccionarlo.</p>
-                    <input type="file" id="fileInputClientes" class="file-input" accept=".csv">
-                    <button class="upload-btn" onclick="document.getElementById('fileInputClientes').click()">Seleccionar archivo</button>
-                </div>
-                <div id="uploadStatusClientes" style="margin-top: 20px; text-align: center; font-weight: bold;"></div>
-            </div>
-        </div>
-
-        <div id="cargar-productos" class="content-section hidden">
-            <div class="section-header">
-                <h2>Cargar Productos (CSV)</h2>
-            </div>
-            <div class="section-content">
-                <div class="upload-area" id="uploadAreaProductos">
-                    <p>Arrastra y suelta tu archivo CSV de productos aquí, o haz clic para seleccionarlo.</p>
-                    <input type="file" id="fileInputProductos" class="file-input" accept=".csv">
-                    <button class="upload-btn" onclick="document.getElementById('fileInputProductos').click()">Seleccionar archivo</button>
-                </div>
-                <div id="uploadStatusProductos" style="margin-top: 20px; text-align: center; font-weight: bold;"></div>
+            <div class="table-content" id="contenidoTabla">
+                <div class="loading">Presiona "Cargar Datos" para comenzar</div>
             </div>
         </div>
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const navItems = document.querySelectorAll('.nav-item[data-target]');
-            const contentSections = document.querySelectorAll('.content-section');
-            const pageTitle = document.getElementById('pageTitle');
-            const refreshButton = document.getElementById('refreshButton');
-
-            let currentActiveSection = 'pedidos-pendientes';
-
-            function showSection(targetId) {
-                contentSections.forEach(section => {
-                    section.classList.add('hidden');
-                });
-                document.getElementById(targetId).classList.remove('hidden');
-                pageTitle.textContent = document.querySelector(`.nav-item[data-target="${targetId}"]`).textContent;
-                currentActiveSection = targetId;
-                loadContentForSection(targetId);
-            }
-
-            navItems.forEach(item => {
-                item.addEventListener('click', function() {
-                    navItems.forEach(nav => nav.classList.remove('active'));
-                    this.classList.add('active');
-                    showSection(this.dataset.target);
-                });
-            });
-
-            refreshButton.addEventListener('click', function() {
-                loadContentForSection(currentActiveSection);
-            });
-
-            // Initial load
-            showSection('pedidos-pendientes');
-
-            // Dark Mode Toggle
-            const toggleDarkModeBtn = document.getElementById('toggleDarkMode');
-            toggleDarkModeBtn.addEventListener('click', () => {
-                document.body.classList.toggle('dark-mode');
-                // You might want to save this preference in localStorage
-            });
-
-            // Drag and Drop for Clients CSV
-            const uploadAreaClientes = document.getElementById('uploadAreaClientes');
-            const fileInputClientes = document.getElementById('fileInputClientes');
-            const uploadStatusClientes = document.getElementById('uploadStatusClientes');
-
-            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                uploadAreaClientes.addEventListener(eventName, preventDefaults, false);
-            });
-
-            function preventDefaults(e) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-
-            ['dragenter', 'dragover'].forEach(eventName => {
-                uploadAreaClientes.addEventListener(eventName, () => uploadAreaClientes.classList.add('dragover'), false);
-            });
-
-            ['dragleave', 'drop'].forEach(eventName => {
-                uploadAreaClientes.addEventListener(eventName, () => uploadAreaClientes.classList.remove('dragover'), false);
-            });
-
-            uploadAreaClientes.addEventListener('drop', handleDropClientes, false);
-            fileInputClientes.addEventListener('change', (e) => handleFilesClientes(e.target.files));
-
-            function handleDropClientes(e) {
-                const dt = e.dataTransfer;
-                const files = dt.files;
-                handleFilesClientes(files);
-            }
-
-            async function handleFilesClientes(files) {
-                if (files.length === 0) return;
-                const file = files;
-                if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
-                    uploadStatusClientes.style.color = 'red';
-                    uploadStatusClientes.textContent = '❌ Por favor, selecciona un archivo CSV.';
-                    return;
-                }
-
-                uploadStatusClientes.style.color = 'orange';
-                uploadStatusClientes.textContent = '📤 Subiendo archivo...';
-
-                const formData = new FormData();
-                formData.append('csvFile', file);
-
-                try {
-                    const response = await fetch('/api/upload-clientes-csv', {
-                        method: 'POST',
-                        body: formData
-                    });
-
-                    const result = await response.json();
-
-                    if (result.success) {
-                        uploadStatusClientes.style.color = 'green';
-                        uploadStatusClientes.textContent = `✅ Clientes cargados: ${result.insertados} insertados, ${result.errores} errores.`;
-                    } else {
-                        uploadStatusClientes.style.color = 'red';
-                        uploadStatusClientes.textContent = `❌ Error al cargar clientes: ${result.error || 'Error desconocido'}`;
-                    }
-                } catch (error) {
-                    console.error('Error uploading clients CSV:', error);
-                    uploadStatusClientes.style.color = 'red';
-                    uploadStatusClientes.textContent = `❌ Error de conexión al subir clientes: ${error.message}`;
-                }
-            }
-
-            // Drag and Drop for Products CSV (similar to clients)
-            const uploadAreaProductos = document.getElementById('uploadAreaProductos');
-            const fileInputProductos = document.getElementById('fileInputProductos');
-            const uploadStatusProductos = document.getElementById('uploadStatusProductos');
-
-            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                uploadAreaProductos.addEventListener(eventName, preventDefaults, false);
-            });
-
-            ['dragenter', 'dragover'].forEach(eventName => {
-                uploadAreaProductos.addEventListener(eventName, () => uploadAreaProductos.classList.add('dragover'), false);
-            });
-
-            ['dragleave', 'drop'].forEach(eventName => {
-                uploadAreaProductos.addEventListener(eventName, () => uploadAreaProductos.classList.remove('dragover'), false);
-            });
-
-            uploadAreaProductos.addEventListener('drop', handleDropProductos, false);
-            fileInputProductos.addEventListener('change', (e) => handleFilesProductos(e.target.files));
-
-            function handleDropProductos(e) {
-                const dt = e.dataTransfer;
-                const files = dt.files;
-                handleFilesProductos(files);
-            }
-
-            async function handleFilesProductos(files) {
-                if (files.length === 0) return;
-                const file = files;
-                if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
-                    uploadStatusProductos.style.color = 'red';
-                    uploadStatusProductos.textContent = '❌ Por favor, selecciona un archivo CSV.';
-                    return;
-                }
-
-                uploadStatusProductos.style.color = 'orange';
-                uploadStatusProductos.textContent = '📤 Subiendo archivo...';
-
-                const formData = new FormData();
-                formData.append('csvFile', file);
-
-                try {
-                    const response = await fetch('/api/upload-productos-csv', {
-                        method: 'POST',
-                        body: formData
-                    });
-
-                    const result = await response.json();
-
-                    if (result.success) {
-                        uploadStatusProductos.style.color = 'green';
-                        uploadStatusProductos.textContent = `✅ Productos cargados: ${result.insertados} insertados, ${result.errores} errores.`;
-                    } else {
-                        uploadStatusProductos.style.color = 'red';
-                        uploadStatusProductos.textContent = `❌ Error al cargar productos: ${result.error || 'Error desconocido'}`;
-                    }
-                } catch (error) {
-                    console.error('Error uploading products CSV:', error);
-                    uploadStatusProductos.style.color = 'red';
-                    uploadStatusProductos.textContent = `❌ Error de conexión al subir productos: ${error.message}`;
-                }
-            }
-
-
-            async function loadContentForSection(sectionId) {
-                const tableContainer = document.getElementById(`${sectionId}Table`);
-                if (!tableContainer) return;
-
-                tableContainer.innerHTML = `<div class="loading">🔄 Cargando ${sectionId.replace(/-/g, ' ')}...</div>`;
-
-                try {
-                    const response = await fetch('/api/pedidos-completos');
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                    }
-                    const data = await response.json();
-
-                    if (data.success && Array.isArray(data.pedidos)) {
-                        let filteredPedidos = [];
-                        if (sectionId === 'pedidos-pendientes') {
-                            filteredPedidos = data.pedidos.filter(p => p.estado === 'PENDIENTE');
-                        } else if (sectionId === 'pedidos-confirmados') {
-                            filteredPedidos = data.pedidos.filter(p => p.estado === 'CONFIRMADO');
-                        } else { // todos-los-pedidos
-                            filteredPedidos = data.pedidos;
-                        }
-                        displayPedidosTable(filteredPedidos, tableContainer, sectionId);
-                    } else {
-                        throw new Error(data.message || 'No se pudieron cargar los datos de pedidos.');
-                    }
-                } catch (error) {
-                    console.error(`Error loading ${sectionId}:`, error);
-                    tableContainer.innerHTML = `
-                        <div class="error">
-                            <h3>❌ Error al cargar ${sectionId.replace(/-/g, ' ')}</h3>
-                            <p>${error.message}</p>
-                            <button class="btn" onclick="loadContentForSection('${sectionId}')">🔄 Reintentar</button>
-                        </div>
-                    `;
-                }
-            }
-
-            function displayPedidosTable(pedidos, container, sectionId) {
-                if (pedidos.length === 0) {
-                    container.innerHTML = `<div class="loading">📭 No hay ${sectionId.replace(/-/g, ' ')}</div>`;
-                    return;
-                }
-
-                const tableHtml = `
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>ID Pedido</th>
-                                <th>Fecha/Hora</th>
-                                <th>Cliente</th>
-                                <th>Items</th>
-                                <th>Total</th>
-                                <th>Estado</th>
-                                <th>Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${pedidos.map(pedido => `
-                                <tr>
-                                    <td>${pedido.pedido_id || '-'}</td>
-                                    <td>${new Date(pedido.fecha_hora).toLocaleString() || '-'}</td>
-                                    <td>${pedido.cliente_nombre || '-'}</td>
-                                    <td class="cantidad">${pedido.items_cantidad || 0}</td>
-                                    <td class="precio">$${(pedido.total || 0).toLocaleString('es-AR')}</td>
-                                    <td><span class="estado ${pedido.estado ? pedido.estado.toLowerCase() : ''}">${pedido.estado || '-'}</span></td>
-                                    <td>
-                                        ${pedido.estado === 'PENDIENTE' ? `
-                                            <button class="btn btn-success btn-sm" onclick="updatePedidoStatus('${pedido.pedido_id}', 'CONFIRMADO', '${sectionId}')">Confirmar</button>
-                                            <button class="btn btn-danger btn-sm" onclick="updatePedidoStatus('${pedido.pedido_id}', 'CANCELADO', '${sectionId}')">Cancelar</button>
-                                        ` : ''}
-                                    </td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                `;
-                container.innerHTML = tableHtml;
-            }
-
-            async function updatePedidoStatus(pedidoId, newStatus, sectionId) {
-                if (!confirm(`¿Estás seguro de que quieres ${newStatus === 'CONFIRMADO' ? 'confirmar' : 'cancelar'} el pedido ${pedidoId}?`)) {
-                    return;
-                }
-
-                try {
-                    const response = await fetch(`/api/pedidos/${pedidoId}/estado`, {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ estado: newStatus })
-                    });
-
-                    const result = await response.json();
-
-                    if (result.success) {
-                        alert(`Pedido ${pedidoId} actualizado a ${newStatus} exitosamente.`);
-                        loadContentForSection(sectionId); // Recargar la sección actual
-                        // También recargar otras secciones si es necesario
-                        if (sectionId !== 'pedidos-pendientes') loadContentForSection('pedidos-pendientes');
-                        if (sectionId !== 'pedidos-confirmados') loadContentForSection('pedidos-confirmados');
-                        if (sectionId !== 'todos-los-pedidos') loadContentForSection('todos-los-pedidos');
-                    } else {
-                        alert(`Error al actualizar el pedido: ${result.error || 'Error desconocido'}`);
-                    }
-                } catch (error) {
-                    console.error('Error updating pedido status:', error);
-                    alert(`Error de conexión al actualizar el estado del pedido: ${error.message}`);
-                }
-            }
-
-            // Add dark mode styles
-            const style = document.createElement('style');
-            style.textContent = `
-                body.dark-mode {
-                    background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%);
-                    color: #ecf0f1;
-                }
-                body.dark-mode .sidebar {
-                    background: rgba(23, 32, 42, 0.95);
-                }
-                body.dark-mode .sidebar h2 {
-                    color: #ecf0f1;
-                }
-                body.dark-mode .nav-item {
-                    background: rgba(30, 40, 50, 0.7);
-                    color: #ecf0f1;
-                }
-                body.dark-mode .nav-item:hover {
-                    background: rgba(52, 152, 219, 0.8);
-                }
-                body.dark-mode .nav-item.active {
-                    background: #3498db;
-                }
-                body.dark-mode .main-content .header,
-                body.dark-mode .content-section {
-                    background: #2c3e50;
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-                }
-                body.dark-mode .header h1 {
-                    color: #ecf0f1;
-                }
-                body.dark-mode .section-header {
-                    background: #1a252f;
-                    color: #ecf0f1;
-                }
-                body.dark-mode th {
-                    background: #1a252f;
-                    color: #ecf0f1;
-                }
-                body.dark-mode td {
-                    border-bottom: 1px solid #34495e;
-                }
-                body.dark-mode tr:hover {
-                    background-color: #34495e;
-                }
-                body.dark-mode .loading,
-                body.dark-mode .cantidad {
-                    color: #bdc3c7;
-                }
-                body.dark-mode .precio {
-                    color: #2ecc71;
-                }
-                body.dark-mode .error {
-                    background: #721c24;
-                    color: #f8d7da;
-                }
-                body.dark-mode .upload-area {
-                    border-color: #34495e;
-                }
-                body.dark-mode .upload-area:hover {
-                    border-color: #3498db;
-                    background: #34495e;
-                }
-                body.dark-mode .upload-area.dragover {
-                    border-color: #27ae60;
-                    background: #2ecc71;
-                }
+        async function cargarDatos() {
+            console.log('🔄 Iniciando carga de datos...');
+            
+            // Mostrar loading
+            document.getElementById('contenidoTabla').innerHTML = `
+                <div class="loading">🔄 Cargando datos de DetallePedidos...</div>
             `;
-            document.head.appendChild(style);
-        });
+            
+            try {
+                const respuesta = await fetch('/api/detalles-pedidos');
+                console.log('📡 Respuesta del servidor:', respuesta.status);
+                
+                if (!respuesta.ok) {
+                    throw new Error(`Error HTTP: ${respuesta.status}`);
+                }
+                
+                const datos = await respuesta.json();
+                console.log('📊 Datos recibidos:', datos);
+                
+                if (datos.success && datos.detalles) {
+                    mostrarTabla(datos.detalles);
+                } else {
+                    throw new Error('No se encontraron datos válidos');
+                }
+                
+            } catch (error) {
+                console.error('❌ Error:', error);
+                mostrarError(error.message);
+            }
+        }
+
+        function mostrarTabla(detalles) {
+            console.log('📋 Mostrando tabla con', detalles.length, 'registros');
+            
+            if (!detalles || detalles.length === 0) {
+                document.getElementById('contenidoTabla').innerHTML = `
+                    <div class="loading">📭 No hay datos disponibles</div>
+                `;
+                return;
+            }
+
+            const html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Detalle ID</th>
+                            <th>Pedido ID</th>
+                            <th>Producto ID</th>
+                            <th>Producto</th>
+                            <th>Categoría</th>
+                            <th>Cantidad</th>
+                            <th>Precio Unit.</th>
+                            <th>Importe</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${detalles.map(detalle => `
+                            <tr>
+                                <td class="detalle-id">${detalle.detalle_id || '-'}</td>
+                                <td class="pedido-id">${detalle.pedido_id || '-'}</td>
+                                <td class="cantidad">${detalle.producto_id || '-'}</td>
+                                <td>${detalle.producto_nombre || '-'}</td>
+                                <td class="cantidad">${detalle.categoria_id || '-'}</td>
+                                <td class="cantidad">${detalle.cantidad || 0}</td>
+                                <td class="precio">$${formatearPrecio(detalle.precio_unitario || 0)}</td>
+                                <td class="precio">$${formatearPrecio(detalle.importe || 0)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+
+            document.getElementById('contenidoTabla').innerHTML = html;
+            console.log('✅ Tabla mostrada exitosamente');
+        }
+
+        function mostrarError(mensaje) {
+            document.getElementById('contenidoTabla').innerHTML = `
+                <div class="error">
+                    <h3>❌ Error</h3>
+                    <p>${mensaje}</p>
+                    <button class="btn" onclick="cargarDatos()">🔄 Reintentar</button>
+                </div>
+            `;
+        }
+
+        function formatearPrecio(precio) {
+            return new Intl.NumberFormat('es-AR').format(precio);
+        }
     </script>
 </body>
 </html>
