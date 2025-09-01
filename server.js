@@ -412,6 +412,25 @@ async function confirmarPedido(ctx, userId, observacion = '') {
   }
 }
 
+// Función para buscar productos
+function buscarProductos(productos, termino, categoriaId = null) {
+  const terminoLower = termino.toLowerCase().trim();
+  
+  return productos.filter(producto => {
+    // Verificar que el producto esté activo
+    if (producto.activo !== 'SI') return false;
+    
+    // Filtrar por categoría si se especifica
+    if (categoriaId && producto.categoria_id != categoriaId) return false;
+    
+    // Buscar en nombre del producto
+    const nombre = (producto.producto_nombre || '').toLowerCase();
+    const id = (producto.producto_id || '').toString();
+    
+    return nombre.includes(terminoLower) || id.includes(terminoLower);
+  });
+}
+
 // Comandos del bot
 bot.start(async (ctx) => {
   const userId = ctx.from.id;
