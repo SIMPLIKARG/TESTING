@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import * as XLSX from 'xlsx';
+import XLSX from 'xlsx';
 
 dotenv.config();
 
@@ -17,37 +17,23 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Middleware básico
+// Middleware
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static('public'));
 
-// Configuración de multer para archivos XLSX
-const storage = multer.memoryStorage();
+// Configuración de multer para archivos
 const upload = multer({
-  storage: storage,
+  dest: 'uploads/',
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB
-    fieldSize: 50 * 1024 * 1024
+    fileSize: 10 * 1024 * 1024 // 10MB
   },
   fileFilter: (req, file, cb) => {
-    console.log('📁 Archivo recibido:', {
-      originalname: file.originalname,
-      mimetype: file.mimetype,
-      size: file.size
-    });
-    
-    // Aceptar archivos XLSX
-    const allowedMimes = [
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-excel'
-    ];
-    
-    if (allowedMimes.includes(file.mimetype) || file.originalname.endsWith('.xlsx')) {
+    if (file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
       cb(null, true);
     } else {
-      cb(new Error('Solo se permiten archivos XLSX'), false);
+      cb(new Error('Solo se permiten archivos XLSX'));
     }
   }
 });
@@ -70,6 +56,37 @@ const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN || 'dummy_token');
 // Estado del usuario (en memoria - en producción usar base de datos)
 const userStates = new Map();
 const userCarts = new Map();
+const searchStates = new Map();
+
+// Datos de ejemplo (fallback si no hay Google Sheets)
+const datosEjemplo = {
+  clientes: [
+    { cliente_id: 1, nombre: 'Juan Pérez', lista: 1, localidad: 'Centro' },
+    { cliente_id: 2, nombre: 'María González', lista: 2, localidad: 'Norte' },
+    { cliente_id: 3, nombre: 'Carlos Rodríguez', lista: 1, localidad: 'Centro' },
+    { cliente_id: 4, nombre: 'Ana Martínez', lista: 3, localidad: 'Sur' },
+    { cliente_id: 5, nombre: 'Luis Fernández', lista: 2, localidad: 'Norte' }
+  ],
+  categorias: [
+    { categoria_id: 1, categoria_nombre: 'Galletitas' },
+    { categoria_id: 2, categoria_nombre: 'Bebidas' },
+    { categoria_id: 3, categoria_nombre: 'Lácteos' },
+    { categoria_id: 4, categoria_nombre: 'Panadería' },
+    { categoria_id: 5, categoria_nombre: 'Conservas' }
+  ],
+  productos: [
+    { producto_id: 1, categoria_id: 1, producto_nombre: 'Oreo Original 117g', precio1: 450, precio2: 420, precio3: 400, precio4: 380, precio5: 360, activo: 'SI' },
+    { producto_id: 2, categoria_id: 1, producto_nombre: 'Pepitos Chocolate 100g', precio1: 380, precio2: 360, precio3: 340, precio4: 320, precio5: 300, activo: 'SI' },
+    { producto_id: 3, categoria_id: 2, producto_nombre: 'Coca Cola 500ml', precio1: 350, precio2: 330, precio3: 310, precio4: 290, precio5: 270, activo: 'SI' },
+    { producto_id: 4, categoria_id: 3, producto_nombre: 'Leche Entera 1L', precio1: 280, precio2: 260, precio3: 240, precio4: 220, precio5: 200, activo: 'SI' },
+    { producto_id: 5, categoria_id: 4, producto_nombre: 'Pan Lactal 500g', precio1: 320, precio2: 300, precio3: 280, precio4: 260, precio5: 240, activo: 'SI' }
+  ],
+  detallepedidos: [
+    { detalle_id: 'DET001', pedido_id: 'PED001', producto_id: 1, producto_nombre: 'Oreo Original 117g', categoria_id: 1, cantidad: 2, precio_unitario: 450, importe: 900 },
+    { detalle_id: 'DET002', pedido_id: 'PED001', producto_id: 4, producto_nombre: 'Leche Entera 1L', categoria_id: 3, cantidad: 1, precio_unitario: 280, importe: 280 },
+    { detalle_id: 'DET003', pedido_id: 'PED002', producto_id: 3, producto_nombre: 'Coca Cola 500ml', categoria_id: 2, cantidad: 1, precio_unitario: 350, importe: 350 }
+  ]
+};
 
 // Funciones auxiliares
 function getUserState(userId) {
@@ -88,69 +105,12 @@ function setUserCart(userId, cart) {
   userCarts.set(userId, cart);
 }
 
-// Función para parsear archivos XLSX
-function parseXLSX(buffer, expectedHeaders) {
-  try {
-    console.log('📊 Parseando archivo XLSX...');
-    
-    // Leer el archivo XLSX desde el buffer
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
-    
-    // Obtener la primera hoja
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    
-    console.log(`📋 Hoja encontrada: "${sheetName}"`);
-    
-    // Convertir a JSON
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-    
-    if (jsonData.length === 0) {
-      throw new Error('El archivo XLSX está vacío');
-    }
-    
-    console.log(`📊 ${jsonData.length} filas encontradas`);
-    
-    // Verificar encabezados
-    const headers = jsonData[0];
-    console.log('📋 Encabezados encontrados:', headers);
-    
-    if (expectedHeaders) {
-      const missingHeaders = expectedHeaders.filter(h => !headers.includes(h));
-      if (missingHeaders.length > 0) {
-        throw new Error(`Encabezados faltantes: ${missingHeaders.join(', ')}`);
-      }
-    }
-    
-    // Convertir filas a objetos
-    const data = [];
-    for (let i = 1; i < jsonData.length; i++) {
-      const row = jsonData[i];
-      
-      // Saltar filas vacías
-      if (!row || row.length === 0 || !row[0]) {
-        continue;
-      }
-      
-      const obj = {};
-      headers.forEach((header, index) => {
-        obj[header] = row[index] ? String(row[index]).trim() : '';
-      });
-      
-      // Validar que el objeto tenga datos válidos
-      const hasValidData = Object.values(obj).some(val => val && val !== '');
-      if (hasValidData) {
-        data.push(obj);
-      }
-    }
-    
-    console.log(`✅ ${data.length} registros válidos parseados`);
-    return data;
-    
-  } catch (error) {
-    console.error('❌ Error parseando XLSX:', error);
-    throw new Error(`Error procesando archivo XLSX: ${error.message}`);
-  }
+function getSearchState(userId) {
+  return searchStates.get(userId) || {};
+}
+
+function setSearchState(userId, state) {
+  searchStates.set(userId, state);
 }
 
 // Función para obtener datos de Google Sheets
@@ -159,24 +119,11 @@ async function obtenerDatosSheet(nombreHoja) {
     console.log(`📊 [obtenerDatosSheet] Iniciando obtención de ${nombreHoja}...`);
     
     if (!SPREADSHEET_ID) {
-      console.log(`❌ [obtenerDatosSheet] GOOGLE_SHEETS_ID no configurado`);
-      console.log('⚠️ Google Sheets no configurado, usando datos de ejemplo');
-      return obtenerDatosEjemplo(nombreHoja);
-    }
-    
-    if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL) {
-      console.log(`❌ [obtenerDatosSheet] GOOGLE_SERVICE_ACCOUNT_EMAIL no configurado`);
-      throw new Error('GOOGLE_SERVICE_ACCOUNT_EMAIL no configurado');
-    }
-    
-    if (!process.env.GOOGLE_PRIVATE_KEY) {
-      console.log(`❌ [obtenerDatosSheet] GOOGLE_PRIVATE_KEY no configurado`);
-      throw new Error('GOOGLE_PRIVATE_KEY no configurado');
+      console.log(`⚠️ [obtenerDatosSheet] Google Sheets no configurado, usando datos de ejemplo para ${nombreHoja}`);
+      return datosEjemplo[nombreHoja.toLowerCase()] || [];
     }
 
-    console.log(`📊 [obtenerDatosSheet] Obteniendo datos de hoja: ${nombreHoja}`);
-    console.log(`📊 [obtenerDatosSheet] Spreadsheet ID: ${SPREADSHEET_ID}`);
-    
+    console.log(`📊 [obtenerDatosSheet] Conectando a Google Sheets para ${nombreHoja}...`);
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${nombreHoja}!A:Z`,
@@ -186,7 +133,7 @@ async function obtenerDatosSheet(nombreHoja) {
     console.log(`📋 [obtenerDatosSheet] ${nombreHoja}: ${rows.length} filas obtenidas`);
     
     if (rows.length === 0) {
-      console.log(`⚠️ [obtenerDatosSheet] ${nombreHoja} está vacía`);
+      console.log(`⚠️ [obtenerDatosSheet] ${nombreHoja} está vacía, retornando array vacío`);
       return [];
     }
 
@@ -215,41 +162,32 @@ async function obtenerDatosSheet(nombreHoja) {
           return obj.producto_id && obj.producto_nombre && obj.producto_nombre !== '';
         }
         if (nombreHoja === 'DetallePedidos') {
-          return obj.detalle_id && obj.pedido_id && obj.producto_id;
-        }
-        if (nombreHoja === 'Pedidos') {
-          return obj.pedido_id && obj.cliente_id;
+          return obj.detalle_id && obj.pedido_id;
         }
         return Object.values(obj).some(val => val && val !== '');
       });
 
     console.log(`✅ [obtenerDatosSheet] ${nombreHoja}: ${data.length} registros válidos procesados`);
     return data;
-    
   } catch (error) {
-    console.error(`❌ [obtenerDatosSheet] Error obteniendo ${nombreHoja}:`, error.message);
-    console.error(`❌ [obtenerDatosSheet] Stack completo:`, error.stack);
+    console.error(`❌ [obtenerDatosSheet] Error en ${nombreHoja}:`, error.message);
+    console.error(`❌ [obtenerDatosSheet] Stack trace:`, error.stack);
     
-    // Información adicional para debugging
-    if (error.message.includes('Unable to parse range')) {
-      console.error(`❌ [obtenerDatosSheet] Problema con el rango. Verifica que la hoja "${nombreHoja}" exista`);
-    }
-    if (error.message.includes('The caller does not have permission')) {
-      console.error(`❌ [obtenerDatosSheet] Problema de permisos. Verifica que la hoja esté compartida con: ${process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL}`);
-    }
-    if (error.message.includes('Requested entity was not found')) {
-      console.error(`❌ [obtenerDatosSheet] Hoja no encontrada. Verifica el SPREADSHEET_ID: ${SPREADSHEET_ID}`);
-    }
-    
-    throw error; // Re-lanzar el error para que el endpoint devuelva 500
+    // Retornar datos de ejemplo en caso de error
+    const fallbackData = datosEjemplo[nombreHoja.toLowerCase()] || [];
+    console.log(`🔄 [obtenerDatosSheet] Usando datos de ejemplo para ${nombreHoja}: ${fallbackData.length} registros`);
+    return fallbackData;
   }
 }
 
 // Función para agregar datos a Google Sheets
 async function agregarDatosSheet(nombreHoja, datos) {
   try {
+    console.log(`📝 [agregarDatosSheet] Agregando datos a ${nombreHoja}:`, datos);
+    
     if (!SPREADSHEET_ID) {
-      throw new Error('Google Sheets no configurado');
+      console.log(`⚠️ [agregarDatosSheet] Google Sheets no configurado, simulando inserción en ${nombreHoja}`);
+      return true;
     }
 
     await sheets.spreadsheets.values.append({
@@ -261,43 +199,11 @@ async function agregarDatosSheet(nombreHoja, datos) {
       }
     });
 
+    console.log(`✅ [agregarDatosSheet] Datos agregados exitosamente a ${nombreHoja}`);
     return true;
   } catch (error) {
-    console.error(`❌ Error agregando datos a ${nombreHoja}:`, error.message);
-    throw error;
-  }
-}
-
-// Función para reemplazar datos completos en Google Sheets
-async function reemplazarDatosSheet(nombreHoja, datos) {
-  try {
-    if (!SPREADSHEET_ID) {
-      throw new Error('Google Sheets no configurado');
-    }
-
-    console.log(`🔄 Reemplazando datos en ${nombreHoja}...`);
-    
-    // Limpiar hoja primero
-    await sheets.spreadsheets.values.clear({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${nombreHoja}!A:Z`
-    });
-    
-    // Insertar nuevos datos
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${nombreHoja}!A1`,
-      valueInputOption: 'RAW',
-      requestBody: {
-        values: datos
-      }
-    });
-
-    console.log(`✅ ${nombreHoja} actualizada con ${datos.length - 1} registros`);
-    return true;
-  } catch (error) {
-    console.error(`❌ Error reemplazando datos en ${nombreHoja}:`, error.message);
-    throw error;
+    console.error(`❌ [agregarDatosSheet] Error agregando datos a ${nombreHoja}:`, error.message);
+    return false;
   }
 }
 
@@ -305,27 +211,6 @@ async function reemplazarDatosSheet(nombreHoja, datos) {
 function calcularPrecio(producto, listaCliente) {
   const precioKey = `precio${listaCliente}`;
   return producto[precioKey] || producto.precio1 || 0;
-}
-
-// Función para agrupar clientes por localidad
-function agruparClientesPorLocalidad(clientes) {
-  const agrupados = {};
-  
-  clientes.forEach(cliente => {
-    const localidad = cliente.localidad || 'Sin localidad';
-    if (!agrupados[localidad]) {
-      agrupados[localidad] = [];
-    }
-    agrupados[localidad].push(cliente);
-  });
-  
-  return agrupados;
-}
-
-// Función para calcular precio según lista del cliente
-function calcularPrecio(producto, listaCliente) {
-  const precioKey = `precio${listaCliente}`;
-  return producto[precioKey] || producto.precio1 || producto.precio || 0;
 }
 
 // Función para generar ID de pedido autoincremental
@@ -355,6 +240,21 @@ async function generarPedidoId() {
     console.error('❌ Error generando ID:', error);
     return `PD${String(Date.now()).slice(-6).padStart(6, '0')}`;
   }
+}
+
+// Función para agrupar clientes por localidad
+function agruparClientesPorLocalidad(clientes) {
+  const agrupados = {};
+  
+  clientes.forEach(cliente => {
+    const localidad = cliente.localidad || 'Sin localidad';
+    if (!agrupados[localidad]) {
+      agrupados[localidad] = [];
+    }
+    agrupados[localidad].push(cliente);
+  });
+  
+  return agrupados;
 }
 
 // Función para confirmar pedido
@@ -419,12 +319,12 @@ async function confirmarPedido(ctx, userId, observacion = '') {
     let mensaje = `✅ *Pedido registrado*\n\n`;
     mensaje += `📋 ID: ${pedidoId}\n`;
     mensaje += `👤 Cliente: ${cliente.nombre}\n`;
-    mensaje += `📅 Fecha: ${new Date().toLocaleString('es-AR')}\n`;
+    mensaje += `📅 Fecha: ${fechaHora}\n`;
     mensaje += `📦 Items: ${itemsTotal}\n`;
     mensaje += `💰 Total: $${montoTotal.toLocaleString()}\n\n`;
     
     if (observacion) {
-      mensaje += `📝 Observación: ${observacion}\n\n`;
+      mensaje += `📝 Observación: ${observacion}\n`;
     }
     
     mensaje += `⏳ Estado: PENDIENTE\n\n`;
@@ -503,7 +403,7 @@ bot.on('callback_query', async (ctx) => {
       const clientes = await obtenerDatosSheet('Clientes');
       
       if (clientes.length === 0) {
-        await ctx.reply('❌ No hay clientes disponibles. Configura Google Sheets primero.');
+        await ctx.reply('❌ No hay clientes disponibles');
         return;
       }
       
@@ -524,13 +424,13 @@ bot.on('callback_query', async (ctx) => {
       keyboard.push([{ text: '📍 ── LOCALIDADES ──', callback_data: 'separator' }]);
       
       // Agregar cada localidad
-      for (const localidad of localidades) {
+      localidades.forEach(localidad => {
         const cantidadClientes = clientesAgrupados[localidad].length;
         keyboard.push([{
           text: `📍 ${localidad} (${cantidadClientes})`,
           callback_data: `localidad_${localidad}`
         }]);
-      }
+      });
       
       await ctx.reply('👤 Selecciona el cliente:', {
         reply_markup: { inline_keyboard: keyboard }
@@ -542,8 +442,9 @@ bot.on('callback_query', async (ctx) => {
       const cart = getUserCart(userId);
       
       if (!cliente) {
-        await ctx.reply('❌ Error: Cliente no seleccionado. Usa /start para comenzar.');
-        return;
+        return bot.handleUpdate({
+          callback_query: { ...ctx.callbackQuery, data: 'hacer_pedido' }
+        });
       }
       
       console.log(`🛒 ${userName} sigue comprando para ${cliente.nombre}`);
@@ -571,7 +472,7 @@ bot.on('callback_query', async (ctx) => {
       
     } else if (callbackData.startsWith('cliente_')) {
       const clienteId = parseInt(callbackData.split('_')[1]);
-      console.log(`👤 Cliente seleccionado: ${clienteId}`);
+      console.log(`👤 Cliente: ${clienteId}`);
       
       const clientes = await obtenerDatosSheet('Clientes');
       const cliente = clientes.find(c => 
@@ -649,7 +550,7 @@ bot.on('callback_query', async (ctx) => {
       
     } else if (callbackData.startsWith('categoria_')) {
       const categoriaId = parseInt(callbackData.split('_')[1]);
-      console.log(`📂 Categoría seleccionada: ${categoriaId}`);
+      console.log(`📂 Categoría: ${categoriaId}`);
       
       const productos = await obtenerDatosSheet('Productos');
       const productosCategoria = productos.filter(p => p.categoria_id == categoriaId && p.activo === 'SI');
@@ -678,7 +579,7 @@ bot.on('callback_query', async (ctx) => {
       
     } else if (callbackData.startsWith('producto_')) {
       const productoId = parseInt(callbackData.split('_')[1]);
-      console.log(`🛍️ Producto seleccionado: ${productoId}`);
+      console.log(`🛍️ Producto: ${productoId}`);
       
       const productos = await obtenerDatosSheet('Productos');
       const producto = productos.find(p => p.producto_id == productoId);
@@ -729,7 +630,7 @@ bot.on('callback_query', async (ctx) => {
       const productoId = parseInt(parts[1]);
       const cantidad = parseInt(parts[2]);
       
-      console.log(`📦 Agregando al carrito: ${cantidad}x producto ${productoId}`);
+      console.log(`📦 Carrito: +${cantidad} producto ${productoId}`);
       
       const productos = await obtenerDatosSheet('Productos');
       const producto = productos.find(p => p.producto_id == productoId);
@@ -794,13 +695,91 @@ bot.on('callback_query', async (ctx) => {
       
       mensaje += `💰 *Total: $${total.toLocaleString()}*`;
       
-      const keyboard = [
-        [{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }],
-        [{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }],
-        [{ text: '🗑️ Vaciar carrito', callback_data: 'vaciar_carrito' }]
-      ];
+      // Crear botones para eliminar productos individuales
+      const keyboard = [];
+      
+      // Agregar botón de eliminar para cada producto (máximo 5 por fila)
+      if (cart.length <= 10) { // Solo mostrar botones individuales si hay pocos productos
+        cart.forEach((item, index) => {
+          keyboard.push([{
+            text: `🗑️ Eliminar: ${item.producto_nombre.substring(0, 25)}${item.producto_nombre.length > 25 ? '...' : ''}`,
+            callback_data: `eliminar_item_${index}`
+          }]);
+        });
+        
+        // Separador visual
+        keyboard.push([{ text: '── ACCIONES ──', callback_data: 'separator' }]);
+      }
+      
+      // Botones principales
+      keyboard.push([{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }]);
+      keyboard.push([{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]);
+      keyboard.push([{ text: '🗑️ Vaciar carrito', callback_data: 'vaciar_carrito' }]);
       
       await ctx.reply(mensaje, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (callbackData.startsWith('eliminar_item_')) {
+      const itemIndex = parseInt(callbackData.split('_')[2]);
+      const cart = getUserCart(userId);
+      
+      if (itemIndex < 0 || itemIndex >= cart.length) {
+        await ctx.reply('❌ Producto no encontrado en el carrito');
+        return;
+      }
+      
+      const itemEliminado = cart[itemIndex];
+      console.log(`🗑️ ${userName} elimina: ${itemEliminado.producto_nombre}`);
+      
+      // Eliminar el producto del carrito
+      cart.splice(itemIndex, 1);
+      setUserCart(userId, cart);
+      
+      if (cart.length === 0) {
+        await ctx.editMessageText('🗑️ Producto eliminado. Tu carrito está vacío.', {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
+            ]
+          }
+        });
+        return;
+      }
+      
+      // Mostrar carrito actualizado
+      let mensaje = '✅ Producto eliminado\n\n🛒 *Tu carrito actualizado:*\n\n';
+      let total = 0;
+      
+      cart.forEach((item, index) => {
+        mensaje += `${index + 1}. *${item.producto_nombre}*\n`;
+        mensaje += `   📦 Cantidad: ${item.cantidad}\n`;
+        mensaje += `   💰 $${item.precio_unitario.toLocaleString()} c/u = $${item.importe.toLocaleString()}\n\n`;
+        total += item.importe;
+      });
+      
+      mensaje += `💰 *Total: $${total.toLocaleString()}*`;
+      
+      // Crear botones actualizados
+      const keyboard = [];
+      
+      if (cart.length <= 10) {
+        cart.forEach((item, index) => {
+          keyboard.push([{
+            text: `🗑️ Eliminar: ${item.producto_nombre.substring(0, 25)}${item.producto_nombre.length > 25 ? '...' : ''}`,
+            callback_data: `eliminar_item_${index}`
+          }]);
+        });
+        
+        keyboard.push([{ text: '── ACCIONES ──', callback_data: 'separator' }]);
+      }
+      
+      keyboard.push([{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }]);
+      keyboard.push([{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]);
+      keyboard.push([{ text: '🗑️ Vaciar carrito', callback_data: 'vaciar_carrito' }]);
+      
+      await ctx.editMessageText(mensaje, {
         parse_mode: 'Markdown',
         reply_markup: { inline_keyboard: keyboard }
       });
@@ -813,6 +792,30 @@ bot.on('callback_query', async (ctx) => {
         return;
       }
       
+      // Preguntar por observaciones antes de finalizar
+      setUserState(userId, { 
+        ...getUserState(userId), 
+        step: 'pregunta_observacion' 
+      });
+      
+      await ctx.reply('📝 ¿Deseas agregar alguna observación al pedido?', {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '✅ Sí, agregar observación', callback_data: 'agregar_observacion' }],
+            [{ text: '❌ No, finalizar sin observación', callback_data: 'finalizar_sin_observacion' }]
+          ]
+        }
+      });
+      
+    } else if (callbackData === 'agregar_observacion') {
+      setUserState(userId, { 
+        ...getUserState(userId), 
+        step: 'escribir_observacion' 
+      });
+      
+      await ctx.reply('📝 Escribe tu observación para el pedido:');
+      
+    } else if (callbackData === 'finalizar_sin_observacion') {
       await confirmarPedido(ctx, userId, '');
       
     } else if (callbackData === 'vaciar_carrito') {
@@ -824,11 +827,20 @@ bot.on('callback_query', async (ctx) => {
           ]
         }
       });
+      
+    } else if (callbackData.startsWith('buscar_producto_')) {
+      const categoriaId = parseInt(callbackData.split('_')[2]);
+      setUserState(userId, { 
+        ...getUserState(userId), 
+        step: 'buscar_producto',
+        categoria_busqueda: categoriaId
+      });
+      await ctx.reply('🔍 Escribe el nombre del producto que buscas:');
     }
     
   } catch (error) {
     console.error('❌ Error en callback:', error);
-    await ctx.reply('❌ Ocurrió un error. Intenta nuevamente con /start');
+    await ctx.reply('❌ Ocurrió un error. Intenta nuevamente.');
   }
 });
 
@@ -932,14 +944,81 @@ bot.on('text', async (ctx) => {
         reply_markup: { inline_keyboard: keyboard }
       });
       
+    } else if (userState.step === 'buscar_producto') {
+      const termino = text.toLowerCase().trim();
+      
+      if (termino.length < 2) {
+        await ctx.reply('❌ Escribe al menos 2 caracteres para buscar');
+        return;
+      }
+      
+      const productos = await obtenerDatosSheet('Productos');
+      const categoriaId = userState.categoria_busqueda;
+      
+      const productosFiltrados = productos.filter(producto => {
+        const nombre = (producto.producto_nombre || '').toLowerCase();
+        const enCategoria = !categoriaId || producto.categoria_id == categoriaId;
+        const activo = producto.activo === 'SI';
+        return nombre.includes(termino) && enCategoria && activo;
+      });
+      
+      if (productosFiltrados.length === 0) {
+        await ctx.reply(`❌ No se encontraron productos con "${text}"`, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔍 Buscar de nuevo', callback_data: `buscar_producto_${categoriaId}` }],
+              [{ text: '📂 Ver categoría', callback_data: `categoria_${categoriaId}` }]
+            ]
+          }
+        });
+        return;
+      }
+      
+      const keyboard = productosFiltrados.map(producto => [{
+        text: `🛍️ ${producto.producto_nombre}`,
+        callback_data: `producto_${producto.producto_id}`
+      }]);
+      
+      const botonesBusquedaExitosa = categoriaId ? [
+        [{ text: '🔍 Buscar de nuevo', callback_data: `buscar_producto_${categoriaId}` }],
+        [{ text: '📂 Ver categoría', callback_data: `categoria_${categoriaId}` }]
+      ] : [
+        [{ text: '🔍 Buscar de nuevo', callback_data: 'buscar_producto_general' }],
+        [{ text: '📂 Ver categorías', callback_data: 'seguir_comprando' }]
+      ];
+      
+      keyboard.push(...botonesBusquedaExitosa);
+      
+      await ctx.reply(`🔍 Encontrados ${productosFiltrados.length} producto(s):`, {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (userState.step === 'escribir_observacion') {
+      const observacion = text.trim();
+      
+      if (observacion.length === 0) {
+        await ctx.reply('❌ Por favor escribe una observación válida o usa /start para cancelar');
+        return;
+      }
+      
+      if (observacion.length > 500) {
+        await ctx.reply('❌ La observación es muy larga. Máximo 500 caracteres.');
+        return;
+      }
+      
+      console.log(`📝 Observación de ${userName}: "${observacion}"`);
+      
+      // Confirmar pedido con observación
+      await confirmarPedido(ctx, userId, observacion);
+      
     } else {
       // Mensaje no reconocido
       await ctx.reply(
-        '❓ No entiendo ese mensaje. Usa /start para comenzar.',
+        '❓ No entiendo ese mensaje. Usa /start para comenzar o los botones del menú.',
         {
           reply_markup: {
             inline_keyboard: [
-              [{ text: '🏠 Menú principal', callback_data: 'hacer_pedido' }]
+              [{ text: '🏠 Menú principal', callback_data: 'start' }]
             ]
           }
         }
@@ -948,140 +1027,99 @@ bot.on('text', async (ctx) => {
     
   } catch (error) {
     console.error('❌ Error procesando mensaje:', error);
-    await ctx.reply('❌ Ocurrió un error. Intenta nuevamente con /start');
+    await ctx.reply('❌ Ocurrió un error. Intenta nuevamente.');
   }
 });
 
-// Función para confirmar pedido
-async function confirmarPedido(ctx, userId, observacion = '') {
-  try {
-    const userState = getUserState(userId);
-    const cart = getUserCart(userId);
-    const cliente = userState.cliente;
-    const pedidoId = userState.pedido_id;
-    
-    if (!cliente || cart.length === 0) {
-      await ctx.reply('❌ Error: No hay cliente o carrito vacío');
-      return;
-    }
-    
-    console.log(`✅ Confirmando pedido ${pedidoId} para ${cliente.nombre}${observacion ? ' con observación' : ''}`);
-    
-    // Calcular totales
-    const itemsTotal = cart.reduce((sum, item) => sum + item.cantidad, 0);
-    const montoTotal = cart.reduce((sum, item) => sum + item.importe, 0);
-    
-    // Crear pedido en Google Sheets
-    const fechaHora = new Date().toISOString();
-    
-    const pedidoData = [
-      pedidoId,
-      fechaHora,
-      cliente.cliente_id,
-      cliente.nombre,
-      itemsTotal,
-      montoTotal,
-      'PENDIENTE',
-      observacion
-    ];
-    
-    await agregarDatosSheet('Pedidos', pedidoData);
-    
-    // Crear detalles del pedido
-    for (let i = 0; i < cart.length; i++) {
-      const item = cart[i];
-      const detalleId = `${pedidoId}_${i + 1}`;
-      
-      const detalleData = [
-        detalleId,
-        pedidoId,
-        item.producto_id,
-        item.producto_nombre,
-        item.categoria_id,
-        item.cantidad,
-        item.precio_unitario,
-        item.importe
-      ];
-      
-      await agregarDatosSheet('DetallePedidos', detalleData);
-    }
-    
-    // Limpiar estado del usuario
-    setUserState(userId, { step: 'idle' });
-    setUserCart(userId, []);
-    
-    // Mensaje de confirmación
-    let mensaje = `✅ *Pedido registrado*\n\n`;
-    mensaje += `📋 ID: ${pedidoId}\n`;
-    mensaje += `👤 Cliente: ${cliente.nombre}\n`;
-    mensaje += `📅 Fecha: ${new Date().toLocaleString()}\n`;
-    mensaje += `📦 Items: ${itemsTotal}\n`;
-    mensaje += `💰 Total: $${montoTotal.toLocaleString()}\n\n`;
-    
-    if (observacion) {
-      mensaje += `📝 Observación: ${observacion}\n\n`;
-    }
-    
-    mensaje += `🎉 ¡Pedido registrado exitosamente!`;
-    
-    await ctx.reply(mensaje, {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '🛒 Nuevo pedido', callback_data: 'hacer_pedido' }]
-        ]
-      }
-    });
-    
-    console.log(`✅ Pedido ${pedidoId} guardado exitosamente`);
-    
-  } catch (error) {
-    console.error('❌ Error confirmando pedido:', error);
-    await ctx.reply('❌ Error al confirmar el pedido. Intenta nuevamente.');
-  }
-}
-
-// Configurar webhook
+// Configurar webhook con validación mejorada
 app.post('/webhook', (req, res) => {
   try {
-    console.log('📨 Webhook recibido de Telegram');
+    console.log('📨 [Webhook] Recibido de Telegram');
+    console.log('📨 [Webhook] Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('📨 [Webhook] Body type:', typeof req.body);
+    console.log('📨 [Webhook] Body keys:', Object.keys(req.body || {}));
     
-    // Verificar que req.body existe y tiene el formato correcto
-    if (!req.body || typeof req.body !== 'object') {
-      console.error('❌ Webhook: req.body vacío o inválido:', req.body);
-      return res.status(400).json({ error: 'Invalid request body' });
+    // Validar que el body existe y tiene la estructura esperada
+    if (!req.body) {
+      console.error('❌ [Webhook] req.body está vacío o undefined');
+      return res.status(400).json({ error: 'Body vacío' });
     }
     
-    // Verificar que tiene update_id (requerido por Telegram)
+    if (typeof req.body !== 'object') {
+      console.error('❌ [Webhook] req.body no es un objeto:', typeof req.body);
+      return res.status(400).json({ error: 'Body inválido' });
+    }
+    
     if (!req.body.update_id) {
-      console.error('❌ Webhook: update_id faltante en req.body:', Object.keys(req.body));
-      return res.status(400).json({ error: 'Missing update_id' });
+      console.error('❌ [Webhook] update_id faltante en req.body:', req.body);
+      return res.status(400).json({ error: 'update_id faltante' });
     }
     
-    console.log(`📨 Update ID: ${req.body.update_id}`);
+    console.log('✅ [Webhook] Estructura válida, procesando con Telegraf...');
+    console.log('📨 [Webhook] Update ID:', req.body.update_id);
+    
     bot.handleUpdate(req.body);
     res.status(200).send('OK');
   } catch (error) {
-    console.error('❌ Error en webhook:', error.message);
-    console.error('❌ Stack trace:', error.stack);
-    res.status(500).send('Error');
+    console.error('❌ [Webhook] Error procesando:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    port: PORT,
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    version: process.version
-  });
+// API Routes
+app.get('/health', async (req, res) => {
+  try {
+    console.log('🏥 [Health] Verificando estado del sistema...');
+    
+    // Verificar configuración básica
+    const config = {
+      google_sheets_configured: !!SPREADSHEET_ID,
+      google_service_account_configured: !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      google_private_key_configured: !!process.env.GOOGLE_PRIVATE_KEY,
+      telegram_bot_configured: !!process.env.TELEGRAM_BOT_TOKEN,
+      node_env: process.env.NODE_ENV || 'development'
+    };
+    
+    // Intentar conexión básica a Google Sheets si está configurado
+    let sheets_status = 'not_configured';
+    if (config.google_sheets_configured) {
+      try {
+        console.log('🏥 [Health] Probando conexión a Google Sheets...');
+        const response = await sheets.spreadsheets.get({
+          spreadsheetId: SPREADSHEET_ID
+        });
+        sheets_status = 'connected';
+        console.log('✅ [Health] Google Sheets conectado exitosamente');
+      } catch (error) {
+        sheets_status = `error: ${error.message}`;
+        console.error('❌ [Health] Error conectando a Google Sheets:', error.message);
+      }
+    }
+    
+    const healthData = {
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development',
+      port: PORT,
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      version: process.version,
+      configuration: config,
+      google_sheets_status: sheets_status
+    };
+    
+    console.log('✅ [Health] Estado del sistema verificado');
+    res.json(healthData);
+  } catch (error) {
+    console.error('❌ [Health] Error en health check:', error);
+    res.status(500).json({
+      status: 'ERROR',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
-// API Routes
 app.get('/api/info', (req, res) => {
   res.json({
     name: 'Sistema Distribuidora Bot',
@@ -1091,67 +1129,190 @@ app.get('/api/info', (req, res) => {
       'Bot de Telegram',
       'Integración Google Sheets',
       'Sistema de pedidos',
-      'Carrito de compras',
-      'Carga de archivos XLSX',
-      'Métricas y estadísticas'
-    ],
-    endpoints: [
-      '/api/clientes',
-      '/api/productos',
-      '/api/detalles-pedidos',
-      '/api/upload-clientes-xlsx',
-      '/api/upload-productos-xlsx',
-      '/api/metricas'
+      'Carrito de compras'
     ]
   });
 });
 
-// Endpoint para obtener clientes
+app.get('/api/test/sheets', async (req, res) => {
+  try {
+    console.log('🧪 [Test] Iniciando prueba de Google Sheets...');
+    
+    if (!SPREADSHEET_ID) {
+      return res.json({
+        success: false,
+        error: 'GOOGLE_SHEETS_ID no configurado',
+        using_fallback: true
+      });
+    }
+    
+    if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL) {
+      return res.json({
+        success: false,
+        error: 'GOOGLE_SERVICE_ACCOUNT_EMAIL no configurado'
+      });
+    }
+    
+    if (!process.env.GOOGLE_PRIVATE_KEY) {
+      return res.json({
+        success: false,
+        error: 'GOOGLE_PRIVATE_KEY no configurado'
+      });
+    }
+    
+    console.log('🧪 [Test] Credenciales presentes, probando conexión...');
+    
+    // Probar conexión básica
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID
+    });
+    
+    console.log('✅ [Test] Conexión exitosa a Google Sheets');
+    
+    // Probar lectura de hojas
+    const hojas = spreadsheet.data.sheets?.map(sheet => sheet.properties?.title) || [];
+    console.log('📋 [Test] Hojas disponibles:', hojas);
+    
+    // Probar lectura de DetallePedidos específicamente
+    let detallePedidosTest = null;
+    try {
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'DetallePedidos!A:Z',
+      });
+      
+      const rows = response.data.values || [];
+      detallePedidosTest = {
+        exists: true,
+        rows_count: rows.length,
+        headers: rows[0] || [],
+        sample_data: rows.slice(1, 3) // Primeras 2 filas de datos
+      };
+      
+      console.log('✅ [Test] DetallePedidos leída exitosamente');
+    } catch (error) {
+      detallePedidosTest = {
+        exists: false,
+        error: error.message
+      };
+      console.error('❌ [Test] Error leyendo DetallePedidos:', error.message);
+    }
+    
+    res.json({
+      success: true,
+      spreadsheet_title: spreadsheet.data.properties?.title,
+      spreadsheet_id: SPREADSHEET_ID,
+      sheets_available: hojas,
+      detalle_pedidos_test: detallePedidosTest,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ [Test] Error en prueba de Google Sheets:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      error_code: error.code,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 app.get('/api/clientes', async (req, res) => {
   try {
-    console.log('📊 Obteniendo clientes...');
+    console.log('👥 [API] Obteniendo clientes...');
     const clientes = await obtenerDatosSheet('Clientes');
-    res.json({ success: true, clientes, total: clientes.length });
+    console.log(`✅ [API] ${clientes.length} clientes obtenidos`);
+    res.json({ success: true, clientes });
   } catch (error) {
-    console.error('❌ Error obteniendo clientes:', error);
+    console.error('❌ [API] Error obteniendo clientes:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Endpoint para obtener productos
 app.get('/api/productos', async (req, res) => {
   try {
-    console.log('📊 Obteniendo productos...');
+    console.log('📦 [API] Obteniendo productos...');
     const productos = await obtenerDatosSheet('Productos');
-    res.json({ success: true, productos, total: productos.length });
+    console.log(`✅ [API] ${productos.length} productos obtenidos`);
+    res.json({ success: true, productos });
   } catch (error) {
-    console.error('❌ Error obteniendo productos:', error);
+    console.error('❌ [API] Error obteniendo productos:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Endpoint para obtener detalles de pedidos
 app.get('/api/detalles-pedidos', async (req, res) => {
   try {
-    console.log('📊 Obteniendo detalles de pedidos...');
+    console.log('📋 [API] Iniciando obtención de detalles de pedidos...');
+    
+    // Verificar configuración antes de intentar conectar
+    if (!SPREADSHEET_ID) {
+      console.log('⚠️ [API] SPREADSHEET_ID no configurado, usando datos de ejemplo');
+      const detallesEjemplo = datosEjemplo.detallepedidos || [];
+      return res.json({ 
+        success: true, 
+        detalles: detallesEjemplo,
+        message: 'Usando datos de ejemplo (Google Sheets no configurado)',
+        source: 'fallback'
+      });
+    }
+    
+    if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
+      console.log('⚠️ [API] Credenciales de Google no configuradas');
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Credenciales de Google Sheets no configuradas' 
+      });
+    }
+    
+    console.log('📊 [API] Obteniendo DetallePedidos de Google Sheets...');
     const detalles = await obtenerDatosSheet('DetallePedidos');
-    res.json({ success: true, detalles, total: detalles.length });
+    
+    console.log(`✅ [API] ${detalles.length} detalles de pedidos obtenidos exitosamente`);
+    
+    res.json({ 
+      success: true, 
+      detalles,
+      total_registros: detalles.length,
+      source: 'google_sheets'
+    });
+    
   } catch (error) {
-    console.error('❌ Error obteniendo detalles:', error);
-    res.status(500).json({ success: false, error: error.message });
+    console.error('❌ [API] Error crítico obteniendo detalles de pedidos:', error);
+    console.error('❌ [API] Stack trace:', error.stack);
+    
+    // En caso de error, intentar retornar datos de ejemplo
+    try {
+      const detallesEjemplo = datosEjemplo.detallepedidos || [];
+      console.log(`🔄 [API] Retornando ${detallesEjemplo.length} registros de ejemplo como fallback`);
+      
+      res.json({ 
+        success: true, 
+        detalles: detallesEjemplo,
+        message: `Error conectando a Google Sheets: ${error.message}`,
+        source: 'fallback'
+      });
+    } catch (fallbackError) {
+      console.error('❌ [API] Error incluso con datos de ejemplo:', fallbackError);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message,
+        fallback_error: fallbackError.message
+      });
+    }
   }
 });
 
-// Endpoint para obtener pedidos completos
 app.get('/api/pedidos-completos', async (req, res) => {
   try {
-    console.log('📊 Solicitud a /api/pedidos-completos recibida');
+    console.log('📊 [API] Obteniendo pedidos completos...');
     
     // Obtener datos de ambas hojas
     const pedidos = await obtenerDatosSheet('Pedidos');
     const detalles = await obtenerDatosSheet('DetallePedidos');
     
-    console.log(`📋 Datos obtenidos - Pedidos: ${pedidos.length}, Detalles: ${detalles.length}`);
+    console.log(`📋 [API] Pedidos: ${pedidos.length}, Detalles: ${detalles.length}`);
     
     // Combinar pedidos con sus detalles
     const pedidosCompletos = pedidos.map(pedido => {
@@ -1187,7 +1348,7 @@ app.get('/api/pedidos-completos', async (req, res) => {
       return fechaB - fechaA;
     });
     
-    console.log(`✅ Procesados ${pedidosCompletos.length} pedidos completos exitosamente`);
+    console.log(`✅ [API] ${pedidosCompletos.length} pedidos completos procesados`);
     
     res.json({ 
       success: true, 
@@ -1197,644 +1358,18 @@ app.get('/api/pedidos-completos', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error completo en /api/pedidos-completos:', error.message);
-    console.error('❌ Stack trace:', error.stack);
+    console.error('❌ [API] Error obteniendo pedidos completos:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Endpoint para obtener métricas
-app.get('/api/metricas', async (req, res) => {
-  try {
-    console.log('📊 Calculando métricas...');
-    
-    // Obtener datos necesarios
-    const productos = await obtenerDatosSheet('Productos');
-    const categorias = await obtenerDatosSheet('Categorias');
-    const detalles = await obtenerDatosSheet('DetallePedidos');
-    
-    console.log(`📊 Datos obtenidos: ${productos.length} productos, ${categorias.length} categorías, ${detalles.length} detalles`);
-    
-    // Calcular métricas por producto
-    const metricas = productos.map(producto => {
-      // Encontrar categoría
-      const categoria = categorias.find(c => c.categoria_id == producto.categoria_id);
-      
-      // Calcular ventas de este producto
-      const ventasProducto = detalles.filter(d => d.producto_id == producto.producto_id);
-      
-      const cantidadVendida = ventasProducto.reduce((sum, venta) => {
-        return sum + (parseInt(venta.cantidad) || 0);
-      }, 0);
-      
-      const ingresosTotales = ventasProducto.reduce((sum, venta) => {
-        return sum + (parseFloat(venta.importe) || 0);
-      }, 0);
-      
-      // Estimar costos (70% del precio de venta)
-      const precioPromedio = parseFloat(producto.precio1) || 0;
-      const costoEstimado = precioPromedio * 0.7;
-      const costoTotal = costoEstimado * cantidadVendida;
-      const gananciaTotal = ingresosTotales - costoTotal;
-      const rentabilidad = ingresosTotales > 0 ? (gananciaTotal / ingresosTotales) * 100 : 0;
-      
-      return {
-        producto_id: producto.producto_id,
-        producto_nombre: producto.producto_nombre,
-        categoria_id: producto.categoria_id,
-        categoria_nombre: categoria ? categoria.categoria_nombre : 'Sin categoría',
-        proveedor_id: producto.proveedor_id || '',
-        proveedor_nombre: producto.proveedor_nombre || '',
-        cantidad_vendida: cantidadVendida,
-        ingresos_totales: Math.round(ingresosTotales),
-        costo_total_estimado: Math.round(costoTotal),
-        ganancia_total_estimada: Math.round(gananciaTotal),
-        rentabilidad_porcentual: Math.round(rentabilidad * 100) / 100
-      };
-    });
-    
-    // Ordenar por ingresos totales (descendente)
-    metricas.sort((a, b) => b.ingresos_totales - a.ingresos_totales);
-    
-    console.log(`✅ Métricas calculadas para ${metricas.length} productos`);
-    
-    res.json({ 
-      success: true, 
-      metricas,
-      resumen: {
-        total_productos: productos.length,
-        productos_vendidos: metricas.filter(m => m.cantidad_vendida > 0).length,
-        ingresos_totales: metricas.reduce((sum, m) => sum + m.ingresos_totales, 0),
-        ganancia_total: metricas.reduce((sum, m) => sum + m.ganancia_total_estimada, 0)
-      }
-    });
-    
-  } catch (error) {
-    console.error('❌ Error calculando métricas:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Endpoint para actualizar hoja de métricas
-app.post('/api/actualizar-metricas', async (req, res) => {
-  try {
-    console.log('🔄 Actualizando hoja de métricas...');
-    
-    if (!SPREADSHEET_ID) {
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Google Sheets no configurado' 
-      });
-    }
-    
-    // Obtener métricas calculadas
-    const metricsResponse = await fetch(`${req.protocol}://${req.get('host')}/api/metricas`);
-    const metricsData = await metricsResponse.json();
-    
-    if (!metricsData.success) {
-      throw new Error('Error obteniendo métricas');
-    }
-    
-    const metricas = metricsData.metricas;
-    
-    // Preparar datos para la hoja de métricas
-    const headers = [
-      'producto_id',
-      'producto_nombre', 
-      'categoria_id',
-      'categoria_nombre',
-      'proveedor_id',
-      'proveedor_nombre',
-      'cantidad_vendida',
-      'ingresos_totales',
-      'costo_total_estimado',
-      'ganancia_total_estimada',
-      'rentabilidad_porcentual'
-    ];
-    
-    const datosParaSheet = [headers];
-    
-    for (const metrica of metricas) {
-      const fila = [
-        metrica.producto_id,
-        metrica.producto_nombre,
-        metrica.categoria_id,
-        metrica.categoria_nombre,
-        metrica.proveedor_id,
-        metrica.proveedor_nombre,
-        metrica.cantidad_vendida,
-        metrica.ingresos_totales,
-        metrica.costo_total_estimado,
-        metrica.ganancia_total_estimada,
-        metrica.rentabilidad_porcentual
-      ];
-      datosParaSheet.push(fila);
-    }
-    
-    // Actualizar hoja de métricas
-    await reemplazarDatosSheet('Metricas', datosParaSheet);
-    
-    console.log(`✅ Hoja de métricas actualizada con ${metricas.length} productos`);
-    
-    res.json({ 
-      success: true, 
-      message: 'Hoja de métricas actualizada exitosamente',
-      productos_actualizados: metricas.length,
-      resumen: metricsData.resumen
-    });
-    
-  } catch (error) {
-    console.error('❌ Error actualizando métricas:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Endpoint para configurar webhook automáticamente
-app.post('/api/setup-webhook', async (req, res) => {
-  try {
-    console.log('🔧 Configurando webhook automáticamente...');
-    
-    const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-    const baseUrl = process.env.RAILWAY_STATIC_URL || `${req.protocol}://${req.get('host')}`;
-    
-    if (!TELEGRAM_BOT_TOKEN) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'TELEGRAM_BOT_TOKEN no configurado' 
-      });
-    }
-    
-    const webhookUrl = `${baseUrl}/webhook`;
-    const apiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
-    
-    console.log(`🔗 Configurando webhook: ${webhookUrl}`);
-    
-    const response = await fetch(`${apiUrl}/setWebhook`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: webhookUrl,
-        allowed_updates: ["message", "callback_query"],
-        drop_pending_updates: true
-      })
-    });
-    
-    const result = await response.json();
-    
-    if (result.ok) {
-      console.log('✅ Webhook configurado exitosamente');
-      res.json({ 
-        success: true, 
-        message: 'Webhook configurado exitosamente',
-        webhook_url: webhookUrl
-      });
-    } else {
-      throw new Error(result.description);
-    }
-    
-  } catch (error) {
-    console.error('❌ Error configurando webhook:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Endpoint para test de Google Sheets
-app.get('/api/test/sheets', async (req, res) => {
-  try {
-    console.log('🧪 Probando conexión a Google Sheets...');
-    
-    if (!SPREADSHEET_ID) {
-      return res.status(500).json({ 
-        success: false, 
-        error: 'GOOGLE_SHEETS_ID no configurado' 
-      });
-    }
-    
-    // Probar obtener información básica del spreadsheet
-    const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: SPREADSHEET_ID
-    });
-    
-    const hojas = spreadsheet.data.sheets?.map(sheet => ({
-      nombre: sheet.properties?.title,
-      id: sheet.properties?.sheetId
-    })) || [];
-    
-    console.log('✅ Conexión a Google Sheets exitosa');
-    
-    res.json({ 
-      success: true, 
-      message: 'Conexión a Google Sheets exitosa',
-      spreadsheet_title: spreadsheet.data.properties?.title,
-      hojas: hojas,
-      spreadsheet_id: SPREADSHEET_ID
-    });
-    
-  } catch (error) {
-    console.error('❌ Error probando Google Sheets:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message,
-      details: 'Verifica las credenciales de Google Cloud y que la hoja esté compartida'
-    });
-  }
-});
-
-// Endpoint para cargar clientes desde XLSX
-app.post('/api/upload-clientes-xlsx', upload.single('file'), async (req, res) => {
-  try {
-    console.log('📁 Iniciando carga de clientes XLSX...');
-    
-    if (!req.file) {
-      console.log('❌ No se recibió archivo');
-      return res.status(400).json({ 
-        success: false, 
-        error: 'No se recibió ningún archivo XLSX' 
-      });
-    }
-    
-    console.log('📁 Archivo recibido:', {
-      originalname: req.file.originalname,
-      mimetype: req.file.mimetype,
-      size: req.file.size
-    });
-    
-    if (!SPREADSHEET_ID) {
-      console.log('❌ Google Sheets no configurado');
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Google Sheets no configurado. Configura GOOGLE_SHEETS_ID.' 
-      });
-    }
-    
-    // Parsear archivo XLSX
-    const expectedHeaders = ['cliente_id', 'nombre'];
-    const clientes = parseXLSX(req.file.buffer, expectedHeaders);
-    
-    if (clientes.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'No se encontraron clientes válidos en el archivo' 
-      });
-    }
-    
-    console.log(`📊 Procesando ${clientes.length} clientes...`);
-    
-    // Preparar datos para Google Sheets (incluir encabezados)
-    const headers = ['cliente_id', 'nombre', 'lista', 'localidad'];
-    const datosParaSheet = [headers];
-    
-    for (const cliente of clientes) {
-      const fila = [
-        cliente.cliente_id || '',
-        cliente.nombre || '',
-        cliente.lista || '1',
-        cliente.localidad || 'Sin localidad'
-      ];
-      datosParaSheet.push(fila);
-    }
-    
-    // Reemplazar datos en Google Sheets
-    await reemplazarDatosSheet('Clientes', datosParaSheet);
-    
-    console.log(`✅ ${clientes.length} clientes cargados exitosamente`);
-    
-    res.json({ 
-      success: true, 
-      message: `${clientes.length} clientes cargados exitosamente`,
-      clientes_procesados: clientes.length,
-      archivo: req.file.originalname
-    });
-    
-  } catch (error) {
-    console.error('❌ Error cargando clientes:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message,
-      details: 'Verifica que el archivo XLSX tenga las columnas: cliente_id, nombre'
-    });
-  }
-});
-
-// Endpoint para cargar productos desde XLSX
-app.post('/api/upload-productos-xlsx', upload.single('file'), async (req, res) => {
-  try {
-    console.log('📁 Iniciando carga de productos XLSX...');
-    
-    if (!req.file) {
-      console.log('❌ No se recibió archivo');
-      return res.status(400).json({ 
-        success: false, 
-        error: 'No se recibió ningún archivo XLSX' 
-      });
-    }
-    
-    console.log('📁 Archivo recibido:', {
-      originalname: req.file.originalname,
-      mimetype: req.file.mimetype,
-      size: req.file.size
-    });
-    
-    if (!SPREADSHEET_ID) {
-      console.log('❌ Google Sheets no configurado');
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Google Sheets no configurado. Configura GOOGLE_SHEETS_ID.' 
-      });
-    }
-    
-    // Parsear archivo XLSX
-    const expectedHeaders = ['producto_id', 'categoria_id', 'producto_nombre'];
-    const productos = parseXLSX(req.file.buffer, expectedHeaders);
-    
-    if (productos.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'No se encontraron productos válidos en el archivo' 
-      });
-    }
-    
-    console.log(`📊 Procesando ${productos.length} productos...`);
-    
-    // Preparar datos para Google Sheets (incluir encabezados)
-    const headers = ['producto_id', 'categoria_id', 'producto_nombre', 'precio1', 'precio2', 'precio3', 'precio4', 'precio5', 'activo'];
-    const datosParaSheet = [headers];
-    
-    for (const producto of productos) {
-      const fila = [
-        producto.producto_id || '',
-        producto.categoria_id || '',
-        producto.producto_nombre || '',
-        producto.precio1 || producto.precio || '0',
-        producto.precio2 || producto.precio || '0',
-        producto.precio3 || producto.precio || '0',
-        producto.precio4 || producto.precio || '0',
-        producto.precio5 || producto.precio || '0',
-        producto.activo || 'SI'
-      ];
-      datosParaSheet.push(fila);
-    }
-    
-    // Reemplazar datos en Google Sheets
-    await reemplazarDatosSheet('Productos', datosParaSheet);
-    
-    console.log(`✅ ${productos.length} productos cargados exitosamente`);
-    
-    res.json({ 
-      success: true, 
-      message: `${productos.length} productos cargados exitosamente`,
-      productos_procesados: productos.length,
-      archivo: req.file.originalname
-    });
-    
-  } catch (error) {
-    console.error('❌ Error cargando productos:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message,
-      details: 'Verifica que el archivo XLSX tenga las columnas: producto_id, categoria_id, producto_nombre'
-    });
-  }
-});
-
-// Endpoint para obtener métricas
-app.get('/api/metricas', async (req, res) => {
-  try {
-    console.log('📊 Calculando métricas...');
-    
-    // Obtener datos necesarios
-    const productos = await obtenerDatosSheet('Productos');
-    const categorias = await obtenerDatosSheet('Categorias');
-    const detalles = await obtenerDatosSheet('DetallePedidos');
-    
-    console.log(`📊 Datos obtenidos: ${productos.length} productos, ${categorias.length} categorías, ${detalles.length} detalles`);
-    
-    // Calcular métricas por producto
-    const metricas = productos.map(producto => {
-      // Encontrar categoría
-      const categoria = categorias.find(c => c.categoria_id == producto.categoria_id);
-      
-      // Calcular ventas de este producto
-      const ventasProducto = detalles.filter(d => d.producto_id == producto.producto_id);
-      
-      const cantidadVendida = ventasProducto.reduce((sum, venta) => {
-        return sum + (parseInt(venta.cantidad) || 0);
-      }, 0);
-      
-      const ingresosTotales = ventasProducto.reduce((sum, venta) => {
-        return sum + (parseFloat(venta.importe) || 0);
-      }, 0);
-      
-      // Estimar costos (70% del precio de venta)
-      const precioPromedio = parseFloat(producto.precio1) || 0;
-      const costoEstimado = precioPromedio * 0.7;
-      const costoTotal = costoEstimado * cantidadVendida;
-      const gananciaTotal = ingresosTotales - costoTotal;
-      const rentabilidad = ingresosTotales > 0 ? (gananciaTotal / ingresosTotales) * 100 : 0;
-      
-      return {
-        producto_id: producto.producto_id,
-        producto_nombre: producto.producto_nombre,
-        categoria_id: producto.categoria_id,
-        categoria_nombre: categoria ? categoria.categoria_nombre : 'Sin categoría',
-        cantidad_vendida: cantidadVendida,
-        ingresos_totales: Math.round(ingresosTotales),
-        costo_total_estimado: Math.round(costoTotal),
-        ganancia_total_estimada: Math.round(gananciaTotal),
-        rentabilidad_porcentual: Math.round(rentabilidad * 100) / 100
-      };
-    });
-    
-    // Ordenar por ingresos totales (descendente)
-    metricas.sort((a, b) => b.ingresos_totales - a.ingresos_totales);
-    
-    console.log(`✅ Métricas calculadas para ${metricas.length} productos`);
-    
-    res.json({ 
-      success: true, 
-      metricas,
-      resumen: {
-        total_productos: productos.length,
-        productos_vendidos: metricas.filter(m => m.cantidad_vendida > 0).length,
-        ingresos_totales: metricas.reduce((sum, m) => sum + m.ingresos_totales, 0),
-        ganancia_total: metricas.reduce((sum, m) => sum + m.ganancia_total_estimada, 0)
-      }
-    });
-    
-  } catch (error) {
-    console.error('❌ Error calculando métricas:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Endpoint para actualizar hoja de métricas
-app.post('/api/actualizar-metricas', async (req, res) => {
-  try {
-    console.log('🔄 Actualizando hoja de métricas...');
-    
-    if (!SPREADSHEET_ID) {
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Google Sheets no configurado' 
-      });
-    }
-    
-    // Obtener métricas calculadas
-    const metricsResponse = await fetch(`${req.protocol}://${req.get('host')}/api/metricas`);
-    const metricsData = await metricsResponse.json();
-    
-    if (!metricsData.success) {
-      throw new Error('Error obteniendo métricas');
-    }
-    
-    const metricas = metricsData.metricas;
-    
-    // Preparar datos para la hoja de métricas
-    const headers = [
-      'producto_id',
-      'producto_nombre', 
-      'categoria_id',
-      'categoria_nombre',
-      'cantidad_vendida',
-      'ingresos_totales',
-      'costo_total_estimado',
-      'ganancia_total_estimada',
-      'rentabilidad_porcentual'
-    ];
-    
-    const datosParaSheet = [headers];
-    
-    for (const metrica of metricas) {
-      const fila = [
-        metrica.producto_id,
-        metrica.producto_nombre,
-        metrica.categoria_id,
-        metrica.categoria_nombre,
-        metrica.cantidad_vendida,
-        metrica.ingresos_totales,
-        metrica.costo_total_estimado,
-        metrica.ganancia_total_estimada,
-        metrica.rentabilidad_porcentual
-      ];
-      datosParaSheet.push(fila);
-    }
-    
-    // Actualizar hoja de métricas
-    await reemplazarDatosSheet('Metricas', datosParaSheet);
-    
-    console.log(`✅ Hoja de métricas actualizada con ${metricas.length} productos`);
-    
-    res.json({ 
-      success: true, 
-      message: 'Hoja de métricas actualizada exitosamente',
-      productos_actualizados: metricas.length,
-      resumen: metricsData.resumen
-    });
-    
-  } catch (error) {
-    console.error('❌ Error actualizando métricas:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Endpoint para configurar webhook automáticamente
-app.post('/api/setup-webhook', async (req, res) => {
-  try {
-    console.log('🔧 Configurando webhook automáticamente...');
-    
-    const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-    const baseUrl = process.env.RAILWAY_STATIC_URL || `${req.protocol}://${req.get('host')}`;
-    
-    if (!TELEGRAM_BOT_TOKEN) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'TELEGRAM_BOT_TOKEN no configurado' 
-      });
-    }
-    
-    const webhookUrl = `${baseUrl}/webhook`;
-    const apiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
-    
-    console.log(`🔗 Configurando webhook: ${webhookUrl}`);
-    
-    const response = await fetch(`${apiUrl}/setWebhook`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: webhookUrl,
-        allowed_updates: ["message", "callback_query"],
-        drop_pending_updates: true
-      })
-    });
-    
-    const result = await response.json();
-    
-    if (result.ok) {
-      console.log('✅ Webhook configurado exitosamente');
-      res.json({ 
-        success: true, 
-        message: 'Webhook configurado exitosamente',
-        webhook_url: webhookUrl
-      });
-    } else {
-      throw new Error(result.description);
-    }
-    
-  } catch (error) {
-    console.error('❌ Error configurando webhook:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Endpoint para test de Google Sheets
-app.get('/api/test/sheets', async (req, res) => {
-  try {
-    console.log('🧪 Probando conexión a Google Sheets...');
-    
-    if (!SPREADSHEET_ID) {
-      return res.status(500).json({ 
-        success: false, 
-        error: 'GOOGLE_SHEETS_ID no configurado' 
-      });
-    }
-    
-    // Probar obtener información básica del spreadsheet
-    const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: SPREADSHEET_ID
-    });
-    
-    const hojas = spreadsheet.data.sheets?.map(sheet => ({
-      nombre: sheet.properties?.title,
-      id: sheet.properties?.sheetId
-    })) || [];
-    
-    console.log('✅ Conexión a Google Sheets exitosa');
-    
-    res.json({ 
-      success: true, 
-      message: 'Conexión a Google Sheets exitosa',
-      spreadsheet_title: spreadsheet.data.properties?.title,
-      hojas: hojas,
-      spreadsheet_id: SPREADSHEET_ID
-    });
-    
-  } catch (error) {
-    console.error('❌ Error probando Google Sheets:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message,
-      details: 'Verifica las credenciales de Google Cloud y que la hoja esté compartida'
-    });
-  }
-});
-
-// Endpoint para actualizar estado de pedido (requiere express.json)
-app.put('/api/pedidos/:pedidoId/estado', express.json(), async (req, res) => {
+// Endpoint para actualizar estado del pedido
+app.put('/api/pedidos/:pedidoId/estado', async (req, res) => {
   try {
     const { pedidoId } = req.params;
     const { estado } = req.body;
     
-    console.log(`🔄 Actualizando pedido ${pedidoId} a estado: ${estado}`);
+    console.log(`🔄 [API] Actualizando pedido ${pedidoId} a estado: ${estado}`);
     
     if (!pedidoId || !estado) {
       return res.status(400).json({ 
@@ -1853,9 +1388,12 @@ app.put('/api/pedidos/:pedidoId/estado', express.json(), async (req, res) => {
     }
     
     if (!SPREADSHEET_ID) {
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Google Sheets no configurado' 
+      console.log(`⚠️ [API] Google Sheets no configurado, simulando actualización`);
+      return res.json({ 
+        success: true, 
+        message: `Estado simulado actualizado a ${estado}`,
+        pedido_id: pedidoId,
+        nuevo_estado: estado
       });
     }
     
@@ -1888,7 +1426,7 @@ app.put('/api/pedidos/:pedidoId/estado', express.json(), async (req, res) => {
     // Buscar la fila del pedido
     let filaEncontrada = -1;
     for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0] === pedidoId) {
+      if (rows[i][0] === pedidoId) { // Asumiendo que pedido_id está en columna A
         filaEncontrada = i;
         break;
       }
@@ -1902,7 +1440,7 @@ app.put('/api/pedidos/:pedidoId/estado', express.json(), async (req, res) => {
     }
     
     // Actualizar el estado en Google Sheets
-    const estadoColumn = String.fromCharCode(65 + estadoColumnIndex);
+    const estadoColumn = String.fromCharCode(65 + estadoColumnIndex); // A=65, B=66, etc.
     const range = `Pedidos!${estadoColumn}${filaEncontrada + 1}`;
     
     await sheets.spreadsheets.values.update({
@@ -1914,7 +1452,7 @@ app.put('/api/pedidos/:pedidoId/estado', express.json(), async (req, res) => {
       }
     });
     
-    console.log(`✅ Pedido ${pedidoId} actualizado a ${estado}`);
+    console.log(`✅ [API] Pedido ${pedidoId} actualizado a ${estado}`);
     
     res.json({ 
       success: true, 
@@ -1925,7 +1463,7 @@ app.put('/api/pedidos/:pedidoId/estado', express.json(), async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error actualizando estado:', error);
+    console.error('❌ [API] Error actualizando estado:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
@@ -1933,9 +1471,224 @@ app.put('/api/pedidos/:pedidoId/estado', express.json(), async (req, res) => {
   }
 });
 
+// Endpoint para cargar clientes desde XLSX
+app.post('/api/upload-clientes-xlsx', upload.single('file'), async (req, res) => {
+  try {
+    console.log('📤 [Upload] Procesando archivo de clientes...');
+    
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No se recibió ningún archivo'
+      });
+    }
+    
+    console.log('📁 [Upload] Archivo recibido:', req.file.originalname);
+    
+    // Leer archivo XLSX
+    const workbook = XLSX.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(worksheet);
+    
+    console.log(`📊 [Upload] ${data.length} filas procesadas del XLSX`);
+    
+    if (data.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'El archivo está vacío o no tiene datos válidos'
+      });
+    }
+    
+    // Validar estructura mínima
+    const primeraFila = data[0];
+    if (!primeraFila.cliente_id || !primeraFila.nombre) {
+      return res.status(400).json({
+        success: false,
+        error: 'El archivo debe tener las columnas: cliente_id, nombre'
+      });
+    }
+    
+    // Procesar y cargar a Google Sheets
+    if (SPREADSHEET_ID) {
+      console.log('📊 [Upload] Cargando clientes a Google Sheets...');
+      
+      // Limpiar hoja de clientes
+      await sheets.spreadsheets.values.clear({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Clientes!A:Z'
+      });
+      
+      // Preparar datos para Google Sheets
+      const headers = Object.keys(primeraFila);
+      const values = [headers, ...data.map(row => headers.map(header => row[header] || ''))];
+      
+      // Insertar datos
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Clientes!A1',
+        valueInputOption: 'RAW',
+        requestBody: { values }
+      });
+      
+      console.log(`✅ [Upload] ${data.length} clientes cargados a Google Sheets`);
+    }
+    
+    res.json({
+      success: true,
+      message: `${data.length} clientes cargados exitosamente`,
+      clientes_procesados: data.length
+    });
+    
+  } catch (error) {
+    console.error('❌ [Upload] Error procesando clientes:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Endpoint para cargar productos desde XLSX
+app.post('/api/upload-productos-xlsx', upload.single('file'), async (req, res) => {
+  try {
+    console.log('📤 [Upload] Procesando archivo de productos...');
+    
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No se recibió ningún archivo'
+      });
+    }
+    
+    console.log('📁 [Upload] Archivo recibido:', req.file.originalname);
+    
+    // Leer archivo XLSX
+    const workbook = XLSX.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(worksheet);
+    
+    console.log(`📊 [Upload] ${data.length} filas procesadas del XLSX`);
+    
+    if (data.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'El archivo está vacío o no tiene datos válidos'
+      });
+    }
+    
+    // Validar estructura mínima
+    const primeraFila = data[0];
+    if (!primeraFila.producto_id || !primeraFila.producto_nombre) {
+      return res.status(400).json({
+        success: false,
+        error: 'El archivo debe tener las columnas: producto_id, producto_nombre'
+      });
+    }
+    
+    // Procesar y cargar a Google Sheets
+    if (SPREADSHEET_ID) {
+      console.log('📊 [Upload] Cargando productos a Google Sheets...');
+      
+      // Limpiar hoja de productos
+      await sheets.spreadsheets.values.clear({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Productos!A:Z'
+      });
+      
+      // Preparar datos para Google Sheets
+      const headers = Object.keys(primeraFila);
+      const values = [headers, ...data.map(row => headers.map(header => row[header] || ''))];
+      
+      // Insertar datos
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Productos!A1',
+        valueInputOption: 'RAW',
+        requestBody: { values }
+      });
+      
+      console.log(`✅ [Upload] ${data.length} productos cargados a Google Sheets`);
+    }
+    
+    res.json({
+      success: true,
+      message: `${data.length} productos cargados exitosamente`,
+      productos_procesados: data.length
+    });
+    
+  } catch (error) {
+    console.error('❌ [Upload] Error procesando productos:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Endpoint para configurar webhook automáticamente
+app.post('/api/setup-webhook', async (req, res) => {
+  try {
+    console.log('🔧 [Setup] Configurando webhook de Telegram...');
+    
+    if (!process.env.TELEGRAM_BOT_TOKEN) {
+      return res.status(400).json({
+        success: false,
+        error: 'TELEGRAM_BOT_TOKEN no configurado'
+      });
+    }
+    
+    // Determinar URL del webhook
+    const baseUrl = process.env.RAILWAY_STATIC_URL || 
+                   process.env.VERCEL_URL || 
+                   `http://localhost:${PORT}`;
+    
+    const webhookUrl = `${baseUrl}/webhook`;
+    
+    console.log(`🔗 [Setup] URL del webhook: ${webhookUrl}`);
+    
+    // Configurar webhook
+    const apiUrl = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
+    const response = await fetch(`${apiUrl}/setWebhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: webhookUrl,
+        allowed_updates: ["message", "callback_query"],
+        drop_pending_updates: true
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (result.ok) {
+      console.log('✅ [Setup] Webhook configurado exitosamente');
+      res.json({
+        success: true,
+        message: 'Webhook configurado exitosamente',
+        webhook_url: webhookUrl
+      });
+    } else {
+      console.error('❌ [Setup] Error configurando webhook:', result.description);
+      res.status(500).json({
+        success: false,
+        error: result.description
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ [Setup] Error en setup-webhook:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Ruta principal
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html', 'index.html'));
 });
 
 // Iniciar servidor
@@ -1944,19 +1697,14 @@ app.listen(PORT, () => {
   console.log(`🌐 Dashboard: http://localhost:${PORT}`);
   console.log(`🤖 Bot de Telegram: ${process.env.TELEGRAM_BOT_TOKEN ? 'Configurado' : 'No configurado'}`);
   console.log(`📊 Google Sheets: ${SPREADSHEET_ID ? 'Configurado' : 'No configurado'}`);
-  console.log('');
-  console.log('📋 Endpoints disponibles:');
-  console.log('   GET  /health - Health check');
-  console.log('   GET  /api/info - Información de la API');
-  console.log('   GET  /api/clientes - Obtener clientes');
-  console.log('   GET  /api/productos - Obtener productos');
-  console.log('   GET  /api/detalles-pedidos - Obtener detalles');
-  console.log('   POST /api/upload-clientes-xlsx - Cargar clientes XLSX');
-  console.log('   POST /api/upload-productos-xlsx - Cargar productos XLSX');
-  console.log('   GET  /api/metricas - Obtener métricas');
-  console.log('   POST /api/actualizar-metricas - Actualizar hoja métricas');
-  console.log('   POST /api/setup-webhook - Configurar webhook');
-  console.log('   GET  /api/test/sheets - Probar Google Sheets');
+  
+  // Configurar webhook automáticamente si estamos en producción
+  if (process.env.NODE_ENV === 'production' && process.env.RAILWAY_STATIC_URL) {
+    console.log('🔧 Configurando webhook automáticamente...');
+    fetch(`http://localhost:${PORT}/api/setup-webhook`, { method: 'POST' })
+      .then(() => console.log('✅ Webhook configurado automáticamente'))
+      .catch(error => console.log('⚠️ Error configurando webhook automático:', error.message));
+  }
 });
 
 // Manejo de errores
@@ -1966,15 +1714,4 @@ process.on('uncaughtException', (error) => {
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('❌ Promesa rechazada no manejada:', reason);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('🛑 SIGTERM recibido, cerrando servidor...');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('🛑 SIGINT recibido, cerrando servidor...');
-  process.exit(0);
 });
