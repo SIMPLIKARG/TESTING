@@ -160,7 +160,8 @@ async function obtenerDatosSheet(nombreHoja) {
     
     if (!SPREADSHEET_ID) {
       console.log(`❌ [obtenerDatosSheet] GOOGLE_SHEETS_ID no configurado`);
-      throw new Error('Google Sheets no configurado. Configura GOOGLE_SHEETS_ID en las variables de entorno.');
+      console.log('⚠️ Google Sheets no configurado, usando datos de ejemplo');
+      return obtenerDatosEjemplo(nombreHoja);
     }
     
     if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL) {
@@ -304,6 +305,147 @@ async function reemplazarDatosSheet(nombreHoja, datos) {
 function calcularPrecio(producto, listaCliente) {
   const precioKey = `precio${listaCliente}`;
   return producto[precioKey] || producto.precio1 || 0;
+}
+
+// Función para agrupar clientes por localidad
+function agruparClientesPorLocalidad(clientes) {
+  const agrupados = {};
+  
+  clientes.forEach(cliente => {
+    const localidad = cliente.localidad || 'Sin localidad';
+    if (!agrupados[localidad]) {
+      agrupados[localidad] = [];
+    }
+    agrupados[localidad].push(cliente);
+  });
+  
+  return agrupados;
+}
+
+// Función para calcular precio según lista del cliente
+function calcularPrecio(producto, listaCliente) {
+  const precioKey = `precio${listaCliente}`;
+  return producto[precioKey] || producto.precio1 || producto.precio || 0;
+}
+
+// Función para generar ID de pedido autoincremental
+async function generarPedidoId() {
+  try {
+    if (!SPREADSHEET_ID) {
+      return `PD${String(Date.now()).slice(-6).padStart(6, '0')}`;
+    }
+
+    const pedidos = await obtenerDatosSheet('Pedidos');
+    
+    // Encontrar el último número de pedido
+    let ultimoNumero = 0;
+    pedidos.forEach(pedido => {
+      if (pedido.pedido_id && pedido.pedido_id.startsWith('PD')) {
+        const numero = parseInt(pedido.pedido_id.replace('PD', ''));
+        if (numero > ultimoNumero) {
+          ultimoNumero = numero;
+        }
+      }
+    });
+    
+    const nuevoNumero = ultimoNumero + 1;
+    return `PD${String(nuevoNumero).padStart(6, '0')}`;
+    
+  } catch (error) {
+    console.error('❌ Error generando ID:', error);
+    return `PD${String(Date.now()).slice(-6).padStart(6, '0')}`;
+  }
+}
+
+// Función para confirmar pedido
+async function confirmarPedido(ctx, userId, observacion = '') {
+  try {
+    const userState = getUserState(userId);
+    const cart = getUserCart(userId);
+    const cliente = userState.cliente;
+    const pedidoId = userState.pedido_id;
+    
+    if (!cliente || cart.length === 0) {
+      await ctx.reply('❌ Error: No hay cliente o carrito vacío');
+      return;
+    }
+    
+    console.log(`✅ Confirmando pedido ${pedidoId} para ${cliente.nombre}${observacion ? ' con observación' : ''}`);
+    
+    // Calcular totales
+    const itemsTotal = cart.reduce((sum, item) => sum + item.cantidad, 0);
+    const montoTotal = cart.reduce((sum, item) => sum + item.importe, 0);
+    
+    // Crear pedido en Google Sheets
+    const fechaHora = new Date().toISOString();
+    
+    const pedidoData = [
+      pedidoId,
+      fechaHora,
+      cliente.cliente_id,
+      cliente.nombre,
+      itemsTotal,
+      montoTotal,
+      'PENDIENTE',
+      observacion
+    ];
+    
+    await agregarDatosSheet('Pedidos', pedidoData);
+    
+    // Crear detalles del pedido
+    for (let i = 0; i < cart.length; i++) {
+      const item = cart[i];
+      const detalleId = `${pedidoId}_${i + 1}`;
+      
+      const detalleData = [
+        detalleId,
+        pedidoId,
+        item.producto_id,
+        item.producto_nombre,
+        item.categoria_id,
+        item.cantidad,
+        item.precio_unitario,
+        item.importe
+      ];
+      
+      await agregarDatosSheet('DetallePedidos', detalleData);
+    }
+    
+    // Limpiar estado del usuario
+    setUserState(userId, { step: 'idle' });
+    setUserCart(userId, []);
+    
+    // Mensaje de confirmación
+    let mensaje = `✅ *Pedido registrado*\n\n`;
+    mensaje += `📋 ID: ${pedidoId}\n`;
+    mensaje += `👤 Cliente: ${cliente.nombre}\n`;
+    mensaje += `📅 Fecha: ${new Date().toLocaleString('es-AR')}\n`;
+    mensaje += `📦 Items: ${itemsTotal}\n`;
+    mensaje += `💰 Total: $${montoTotal.toLocaleString()}\n\n`;
+    
+    if (observacion) {
+      mensaje += `📝 Observación: ${observacion}\n\n`;
+    }
+    
+    mensaje += `⏳ Estado: PENDIENTE\n\n`;
+    mensaje += `🎉 ¡Pedido registrado exitosamente!`;
+    
+    await ctx.reply(mensaje, {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🛒 Nuevo pedido', callback_data: 'hacer_pedido' }],
+          [{ text: '🏠 Menú principal', callback_data: 'start' }]
+        ]
+      }
+    });
+    
+    console.log(`✅ Pedido ${pedidoId} guardado exitosamente`);
+    
+  } catch (error) {
+    console.error('❌ Error confirmando pedido:', error);
+    await ctx.reply('❌ Error al confirmar el pedido. Intenta nuevamente.');
+  }
 }
 
 // Comandos del bot
