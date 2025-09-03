@@ -786,6 +786,36 @@ bot.on('callback_query', async (ctx) => {
         }
       );
       
+    } else if (callbackData.startsWith('custom|')) {
+      const [, productoId, paginaAnterior, categoriaId] = callbackData.split('|').map(Number);
+      
+      console.log(`🔢 [custom] Cantidad personalizada para producto ${productoId}`);
+      
+      const productos = await obtenerDatosSheet('Productos');
+      const producto = productos.find(p => p.producto_id == productoId);
+      
+      if (!producto) {
+        await ctx.reply('❌ Producto no encontrado');
+        return;
+      }
+      
+      // Guardar información del producto en el estado para usar después
+      setUserState(userId, { 
+        ...getUserState(userId), 
+        step: 'cantidad_custom', 
+        producto_id: productoId,
+        pagina_anterior: paginaAnterior,
+        categoria_id: categoriaId
+      });
+      
+      const userState = getUserState(userId);
+      const cliente = userState.cliente;
+      const precio = calcularPrecio(producto, cliente.lista || 1);
+      
+      await ctx.editMessageText(
+        `🔢 Cantidad personalizada\n\n🛍️ ${producto.producto_nombre}\n💰 Precio: $${precio.toLocaleString()}\n\n✏️ Escribe la cantidad que deseas:`
+      );
+      
     } else if (callbackData === 'ver_carrito') {
       await displayCart(ctx, userId, false);
       
