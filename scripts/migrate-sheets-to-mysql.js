@@ -5,21 +5,11 @@
  * Ejecutar con: node scripts/migrate-sheets-to-mysql.js
  */
 
-import { GoogleAuth } from 'google-auth-library';
 import { google } from 'googleapis';
 import { createPool } from 'mysql2/promise';
 import dotenv from 'dotenv';
 
 dotenv.config();
-
-// Configuración de Google Sheets
-const auth = new GoogleAuth({
-  credentials: {
-    client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-  },
-  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-});
 
 let sheets;
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID;
@@ -289,6 +279,15 @@ async function ejecutarMigracion() {
     
     // Verificar conexiones
     console.log('🔍 Verificando conexiones...');
+    
+    // Configuración de Google Sheets usando googleapis directamente
+    const auth = new google.auth.GoogleAuth({
+      credentials: {
+        client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      },
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
     
     // Inicializar cliente autenticado de Google
     const authClient = await auth.getClient();
