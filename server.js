@@ -444,6 +444,71 @@ bot.on('callback_query', async (ctx) => {
         reply_markup: { inline_keyboard: keyboard }
       });
       
+    } else if (callbackData.startsWith('localidad_')) {
+      const localidad = decodeURIComponent(callbackData.split('_')[1]);
+      console.log(`📍 Localidad seleccionada: ${localidad}`);
+      
+      const clientes = await obtenerDatosSheet('Clientes');
+      
+      // --- LOGS DE DEPURACIÓN DETALLADOS ---
+      console.log(`DEBUG: Total de clientes obtenidos de la hoja: ${clientes.length}`);
+      console.log(`DEBUG: Tipo de datos clientes:`, typeof clientes, Array.isArray(clientes));
+      
+      if (clientes.length > 0) {
+        console.log(`DEBUG: Primeros 3 clientes (estructura):`);
+        clientes.slice(0, 3).forEach((c, i) => {
+          console.log(`  ${i+1}. ID: ${c.cliente_id}, Nombre: "${c.nombre}", Localidad: "${c.localidad}"`);
+        });
+      }
+      
+      console.log(`DEBUG: Buscando clientes para localidad: "${localidad}"`);
+      
+      const clientesLocalidad = clientes.filter(cliente => {
+        const clienteLocalidad = (cliente.localidad || '').toString().trim();
+        const localidadBuscada = localidad.toString().trim();
+        
+        console.log(`DEBUG: Comparando "${clienteLocalidad}" === "${localidadBuscada}" = ${clienteLocalidad === localidadBuscada}`);
+        
+        return clienteLocalidad === localidadBuscada;
+      });
+      
+      console.log(`DEBUG: Clientes encontrados para "${localidad}": ${clientesLocalidad.length}`);
+      if (clientesLocalidad.length > 0) {
+        console.log(`DEBUG: Nombres de clientes encontrados:`, clientesLocalidad.map(c => c.nombre));
+      } else {
+        console.log(`DEBUG: ❌ NO se encontraron clientes para "${localidad}"`);
+        console.log(`DEBUG: Localidades disponibles en los datos:`, [...new Set(clientes.map(c => c.localidad || 'Sin localidad'))]);
+      }
+      // --- FIN LOGS DE DEPURACIÓN ---
+      
+      if (clientesLocalidad.length === 0) {
+        console.log(`❌ No hay clientes en localidad "${localidad}"`);
+        await ctx.reply(`❌ No se encontraron clientes en "${localidad}". Verifica la hoja de Google Sheets.`, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔙 Volver a localidades', callback_data: 'hacer_pedido' }]
+            ]
+          }
+        });
+        return;
+      }
+      
+      const keyboard = clientesLocalidad.map(cliente => {
+        const nombreCliente = cliente.nombre || cliente.Nombre || `Cliente ${cliente.cliente_id}`;
+        const clienteId = cliente.cliente_id || cliente.Cliente_id || cliente.id;
+        
+        return [{
+          text: `👤 ${nombreCliente}`,
+          callback_data: `cliente_${clienteId}`
+        }];
+      });
+      
+      keyboard.push([{ text: '🔙 Volver a localidades', callback_data: 'hacer_pedido' }]);
+      
+      await ctx.editMessageText(`📍 Clientes en ${localidad}:`, {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
     } else if (callbackData === 'seguir_comprando') {
       const userState = getUserState(userId);
       const cliente = userState.cliente;
