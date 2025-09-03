@@ -363,6 +363,66 @@ function agregarProductoAlCarrito(userId, producto, cantidad, precio) {
   };
 }
 
+// Función para mostrar el carrito (modo normal o edición)
+async function displayCart(ctx, userId, isEditing = false) {
+  const cart = getUserCart(userId);
+  
+  if (cart.length === 0) {
+    await ctx.editMessageText('🛒 Tu carrito está vacío', {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
+        ]
+      }
+    });
+    return;
+  }
+  
+  let mensaje = isEditing ? '✏️ *Editando carrito:*\n\n' : '🛒 *Tu carrito:*\n\n';
+  let total = 0;
+  
+  cart.forEach((item, index) => {
+    mensaje += `${index + 1}. *${item.producto_nombre}*\n`;
+    mensaje += `   📦 Cantidad: ${item.cantidad}\n`;
+    mensaje += `   💰 $${item.precio_unitario.toLocaleString()} c/u = $${item.importe.toLocaleString()}\n\n`;
+    total += item.importe;
+  });
+  
+  mensaje += `💰 *Total: $${total.toLocaleString()}*`;
+  
+  const keyboard = [];
+  
+  if (isEditing) {
+    // Modo edición: mostrar controles para cada producto
+    cart.forEach((item, index) => {
+      const nombreCorto = item.producto_nombre.length > 20 ? 
+        item.producto_nombre.substring(0, 17) + '...' : 
+        item.producto_nombre;
+      
+      keyboard.push([
+        { text: '➖', callback_data: `edit_qty_minus|${index}` },
+        { text: `${item.cantidad} ${nombreCorto}`, callback_data: 'noop' },
+        { text: '➕', callback_data: `edit_qty_plus|${index}` },
+        { text: '🗑️', callback_data: `remove_item|${index}` }
+      ]);
+    });
+    
+    keyboard.push([{ text: '✅ Terminar edición', callback_data: 'done_editing_cart' }]);
+    
+  } else {
+    // Modo normal: mostrar botones estándar
+    keyboard.push([{ text: '✏️ Editar carrito', callback_data: 'edit_cart' }]);
+    keyboard.push([{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }]);
+    keyboard.push([{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]);
+    keyboard.push([{ text: '🗑️ Vaciar carrito', callback_data: 'empty_cart' }]);
+  }
+  
+  await ctx.editMessageText(mensaje, {
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: keyboard }
+  });
+}
+
 // Comandos del bot
 bot.start(async (ctx) => {
   const userId = ctx.from.id;
@@ -670,51 +730,92 @@ bot.on('callback_query', async (ctx) => {
       );
       
     } else if (callbackData === 'ver_carrito') {
+      await displayCart(ctx, userId, false);
+      
+    } else if (callbackData === 'edit_cart') {
+      console.log(`✏️ ${userName} entra en modo edición del carrito`);
+      setUserState(userId, { ...getUserState(userId), editing_cart: true });
+      await displayCart(ctx, userId, true);
+      
+    } else if (callbackData === 'done_editing_cart') {
+      console.log(`✅ ${userName} termina edición del carrito`);
+      setUserState(userId, { ...getUserState(userId), editing_cart: false });
+      await displayCart(ctx, userId, false);
+      
+    } else if (callbackData.startsWith('edit_qty_plus|')) {
+      const index = parseInt(callbackData.split('|')[1]);
       const cart = getUserCart(userId);
       
-      if (cart.length === 0) {
-        await ctx.reply('🛒 Tu carrito está vacío', {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
-            ]
-          }
-        });
-        return;
-      }
-      
-      let mensaje = '🛒 *Tu carrito:*\n\n';
-      let total = 0;
-      
-      cart.forEach((item, index) => {
-        mensaje += `${index + 1}. *${item.producto_nombre}*\n`;
-        mensaje += `   📦 Cantidad: ${item.cantidad}\n`;
-        mensaje += `   💰 $${item.precio_unitario.toLocaleString()} c/u = $${item.importe.toLocaleString()}\n\n`;
-        total += item.importe;
-      });
-      
-      mensaje += `💰 *Total: $${total.toLocaleString()}*`;
-      
-      const keyboard = [];
-      
-      if (cart.length <= 10) {
-        cart.forEach((item, index) => {
-          keyboard.push([{
-            text: `🗑️ ${item.producto_nombre.substring(0, 25)}${item.producto_nombre.length > 25 ? '...' : ''}`,
-            callback_data: `eliminar|${index}`
-          }]);
-        });
+      if (index >= 0 && index < cart.length) {
+        if (cart[index].cantidad >= 999) {
+          await ctx.answerCbQuery('❌ Cantidad máxima alcanzada (999)', { show_alert: true });
+          return;
+        }
         
-        keyboard.push([{ text: '── ACCIONES ──', callback_data: 'separator' }]);
+        cart[index].cantidad += 1;
+        cart[index].importe = cart[index].precio_unitario * cart[index].cantidad;
+        setUserCart(userId, cart);
+        
+        console.log(`➕ ${userName} aumenta cantidad de ${cart[index].producto_nombre} a ${cart[index].cantidad}`);
+        await displayCart(ctx, userId, true);
       }
       
-      keyboard.push([{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }]);
-      keyboard.push([{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]);
-      keyboard.push([{ text: '🗑️ Vaciar carrito', callback_data: 'vaciar_carrito' }]);
+    } else if (callbackData.startsWith('edit_qty_minus|')) {
+      const index = parseInt(callbackData.split('|')[1]);
+      const cart = getUserCart(userId);
       
-      await ctx.reply(mensaje, {
-        parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: keyboard }
+      if (index >= 0 && index < cart.length) {
+        cart[index].cantidad -= 1;
+        
+        if (cart[index].cantidad <= 0) {
+          console.log(`🗑️ ${userName} elimina ${cart[index].producto_nombre} (cantidad = 0)`);
+          cart.splice(index, 1);
+        } else {
+          cart[index].importe = cart[index].precio_unitario * cart[index].cantidad;
+          console.log(`➖ ${userName} reduce cantidad de ${cart[index].producto_nombre} a ${cart[index].cantidad}`);
+        }
+        
+        setUserCart(userId, cart);
+        await displayCart(ctx, userId, true);
+      }
+      
+    } else if (callbackData.startsWith('remove_item|')) {
+      const index = parseInt(callbackData.split('|')[1]);
+      const cart = getUserCart(userId);
+      
+      if (index >= 0 && index < cart.length) {
+        const itemEliminado = cart[index];
+        console.log(`🗑️ ${userName} elimina completamente: ${itemEliminado.producto_nombre}`);
+        
+        cart.splice(index, 1);
+        setUserCart(userId, cart);
+        
+        const userState = getUserState(userId);
+        const isEditing = userState.editing_cart || false;
+        
+        if (cart.length === 0) {
+          setUserState(userId, { ...userState, editing_cart: false });
+          await ctx.editMessageText('🗑️ Producto eliminado. Tu carrito está vacío.', {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
+              ]
+            }
+          });
+        } else {
+          await displayCart(ctx, userId, isEditing);
+        }
+      }
+      
+    } else if (callbackData === 'empty_cart') {
+      setUserCart(userId, []);
+      setUserState(userId, { ...getUserState(userId), editing_cart: false });
+      await ctx.editMessageText('🗑️ Carrito vaciado', {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
+          ]
+        }
       });
       
     } else if (callbackData === 'finalizar_pedido') {
@@ -749,16 +850,6 @@ bot.on('callback_query', async (ctx) => {
       
     } else if (callbackData === 'finalizar_sin_observacion') {
       await confirmarPedido(ctx, userId, '');
-      
-    } else if (callbackData === 'vaciar_carrito') {
-      setUserCart(userId, []);
-      await ctx.reply('🗑️ Carrito vaciado', {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
-          ]
-        }
-      });
       
     } else if (callbackData === 'noop') {
       // No hacer nada, es solo informativo
