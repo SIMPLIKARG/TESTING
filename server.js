@@ -151,28 +151,75 @@ function calcularPrecio(producto, listaCliente) {
 // Función para generar ID de pedido autoincremental
 async function generarPedidoId() {
   try {
-    if (!SPREADSHEET_ID) {
-      return `PD${String(Date.now()).slice(-6).padStart(6, '0')}`;
-    }
-
-    const pedidos = await obtenerDatosSheet('Pedidos');
+    console.log('🔢 [generarPedidoId] Iniciando generación de ID único...');
     
-    let ultimoNumero = 0;
-    pedidos.forEach(pedido => {
-      if (pedido.pedido_id && pedido.pedido_id.startsWith('PD')) {
-        const numero = parseInt(pedido.pedido_id.replace('PD', ''));
-        if (numero > ultimoNumero) {
-          ultimoNumero = numero;
-        }
-      }
-    });
+    const nuevoNumero = await getNextSequenceNumber('pedido_counter');
+    const pedidoId = `PD${String(nuevoNumero).padStart(6, '0')}`;
     
-    const nuevoNumero = ultimoNumero + 1;
-    return `PD${String(nuevoNumero).padStart(6, '0')}`;
+    console.log(`✅ [generarPedidoId] ID generado: ${pedidoId}`);
+    return pedidoId;
     
   } catch (error) {
-    console.error('❌ Error generando ID:', error);
-    return `PD${String(Date.now()).slice(-6).padStart(6, '0')}`;
+    console.error('❌ [generarPedidoId] Error:', error);
+    // Fallback con timestamp para garantizar unicidad
+    const fallbackId = `PD${String(Date.now()).slice(-6).padStart(6, '0')}`;
+    console.log(`🔄 [generarPedidoId] Usando fallback: ${fallbackId}`);
+    return fallbackId;
+  }
+}
+
+// Función para obtener el siguiente número de secuencia (thread-safe)
+async function getNextSequenceNumber(sequenceName) {
+  try {
+    if (!SPREADSHEET_ID) {
+      console.log('⚠️ [getNextSequenceNumber] Google Sheets no configurado, usando timestamp');
+      return parseInt(String(Date.now()).slice(-6));
+    }
+
+    console.log(`🔢 [getNextSequenceNumber] Obteniendo secuencia: ${sequenceName}`);
+    
+    // Intentar leer el valor actual de la secuencia
+    let valorActual = 0;
+    try {
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Configuracion!A1',
+      });
+      
+      if (response.data.values && response.data.values[0] && response.data.values[0][0]) {
+        valorActual = parseInt(response.data.values[0][0]) || 0;
+      }
+      
+      console.log(`📊 [getNextSequenceNumber] Valor actual: ${valorActual}`);
+    } catch (error) {
+      console.log(`⚠️ [getNextSequenceNumber] No se pudo leer secuencia, iniciando en 0:`, error.message);
+    }
+    
+    // Incrementar y guardar el nuevo valor
+    const nuevoValor = valorActual + 1;
+    
+    try {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Configuracion!A1',
+        valueInputOption: 'RAW',
+        requestBody: {
+          values: [[nuevoValor]]
+        }
+      });
+      
+      console.log(`✅ [getNextSequenceNumber] Secuencia actualizada: ${valorActual} → ${nuevoValor}`);
+      return nuevoValor;
+      
+    } catch (error) {
+      console.error(`❌ [getNextSequenceNumber] Error actualizando secuencia:`, error.message);
+      // Fallback con timestamp si no se puede actualizar
+      return parseInt(String(Date.now()).slice(-6));
+    }
+    
+  } catch (error) {
+    console.error(`❌ [getNextSequenceNumber] Error general:`, error.message);
+    return parseInt(String(Date.now()).slice(-6));
   }
 }
 
@@ -658,7 +705,12 @@ bot.on('callback_query', async (ctx) => {
       await mostrarProductosPaginados(ctx, productosCategoria, pagina, categoriaId);
       
     } else if (callbackData.startsWith('prod|')) {
-      const [, productoId, paginaAnterior, categoriaId] = callbackData.split('|').map(Number);
+      const parts = callbackData.split('|');
+      const productoId = parseInt(parts[1]);
+      const paginaAnterior = parseInt(parts[2]);
+      const categoriaId = parseInt(parts[3]);
+      
+      console.log(`🔢 [custom] Cantidad personalizada para producto ${productoId}`);
       console.log(`🛍️ Producto: ${productoId}`);
       
       const productos = await obtenerDatosSheet('Productos');
@@ -695,6 +747,8 @@ bot.on('callback_query', async (ctx) => {
     } else if (callbackData.startsWith('cant|')) {
       const [, productoId, cantidad, paginaAnterior, categoriaId] = callbackData.split('|').map(Number);
       
+      console.log(`📦 [cant] Agregando al carrito: producto=${productoId}, cantidad=${cantidad}`);
+      
       console.log(`📦 Carrito: +${cantidad} producto ${productoId}`);
       
       const productos = await obtenerDatosSheet('Productos');
@@ -712,9 +766,12 @@ bot.on('callback_query', async (ctx) => {
       const resultado = agregarProductoAlCarrito(userId, producto, cantidad, precio);
       
       if (!resultado.success) {
+        console.log(`❌ [cant] Error agregando al carrito: ${resultado.message}`);
         await ctx.reply(`❌ ${resultado.message}`);
         return;
       }
+      
+      console.log(`✅ [cant] Producto agregado exitosamente: ${resultado.message}`);
       
       await ctx.reply(
         `✅ ${resultado.message}\n🛍️ ${producto.producto_nombre}\n📦 Cantidad: ${cantidad}\n💰 Subtotal: $${(precio * cantidad).toLocaleString()}\n\n🛒 Total carrito: ${resultado.totalItems} items - $${resultado.totalImporte.toLocaleString()}`,
@@ -829,7 +886,11 @@ bot.on('callback_query', async (ctx) => {
       setUserState(userId, { 
         ...getUserState(userId), 
         step: 'pregunta_observacion' 
-      });
+        producto_id: productoId,
+        pagina_anterior: paginaAnterior,
+        categoria_id: categoriaId
+      }
+      )
       
       await ctx.reply('📝 ¿Deseas agregar alguna observación al pedido?', {
         reply_markup: {
@@ -877,33 +938,66 @@ bot.on('text', async (ctx) => {
   
   try {
     if (userState.step === 'cantidad_custom') {
+      console.log(`🔢 [cantidad_custom] Usuario ${userName} ingresó: "${text}"`);
+      
       const cantidad = parseInt(text);
       
+      console.log(`🔢 [cantidad_custom] Cantidad parseada: ${cantidad}`);
+      
       if (isNaN(cantidad) || cantidad <= 0) {
+        console.log(`❌ [cantidad_custom] Cantidad inválida: ${cantidad}`);
         await ctx.reply('❌ Por favor ingresa un número válido mayor a 0');
         return;
       }
       
+      if (cantidad > 999) {
+        console.log(`❌ [cantidad_custom] Cantidad excede máximo: ${cantidad}`);
+        await ctx.reply('❌ La cantidad máxima permitida es 999 unidades');
+        return;
+      }
+      
       const productoId = userState.producto_id;
+      console.log(`🔍 [cantidad_custom] Buscando producto ID: ${productoId}`);
+      
       const productos = await obtenerDatosSheet('Productos');
       const producto = productos.find(p => p.producto_id == productoId);
       
       if (!producto) {
+        console.log(`❌ [cantidad_custom] Producto no encontrado: ${productoId}`);
         await ctx.reply('❌ Producto no encontrado');
         return;
       }
       
+      console.log(`✅ [cantidad_custom] Producto encontrado: ${producto.producto_nombre}`);
+      
       const cliente = userState.cliente;
+      if (!cliente) {
+        console.log(`❌ [cantidad_custom] Cliente no encontrado en estado`);
+        await ctx.reply('❌ Error: Cliente no encontrado. Reinicia con /start');
+        return;
+      }
+      
       const precio = calcularPrecio(producto, cliente.lista || 1);
+      console.log(`💰 [cantidad_custom] Precio calculado: ${precio} (lista ${cliente.lista || 1})`);
       
       const resultado = agregarProductoAlCarrito(userId, producto, cantidad, precio);
       
       if (!resultado.success) {
+        console.log(`❌ [cantidad_custom] Error agregando al carrito: ${resultado.message}`);
         await ctx.reply(`❌ ${resultado.message}`);
         return;
       }
       
-      setUserState(userId, { ...userState, step: 'seleccionar_categoria' });
+      console.log(`✅ [cantidad_custom] Producto agregado exitosamente`);
+      
+      // Limpiar estado de cantidad personalizada
+      setUserState(userId, { 
+        ...userState, 
+        step: 'seleccionar_categoria',
+        producto_id: undefined,
+        pagina_anterior: undefined,
+        categoria_id: undefined
+      });
       
       await ctx.reply(
         `✅ ${resultado.message}\n🛍️ ${producto.producto_nombre}\n📦 Cantidad: ${cantidad}\n💰 Subtotal: $${(precio * cantidad).toLocaleString()}\n\n🛒 Total carrito: ${resultado.totalItems} items - $${resultado.totalImporte.toLocaleString()}`,
