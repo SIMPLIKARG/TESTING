@@ -21,7 +21,7 @@ const auth = new GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/spreadsheets'],
 });
 
-const sheets = google.sheets({ version: 'v4', auth });
+let sheets;
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID;
 
 // Configuración de MySQL
@@ -289,6 +289,10 @@ async function ejecutarMigracion() {
     
     // Verificar conexiones
     console.log('🔍 Verificando conexiones...');
+    
+    // Inicializar cliente autenticado de Google
+    const authClient = await auth.getClient();
+    sheets = google.sheets({ version: 'v4', auth: authClient });
     
     // Verificar Google Sheets
     if (!SPREADSHEET_ID) {
