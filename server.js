@@ -6,6 +6,8 @@ import { google } from 'googleapis';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import multer from 'multer';
+import xlsx from 'xlsx';
 
 dotenv.config();
 
@@ -19,6 +21,22 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
+
+// Configurar multer para carga de archivos
+const upload = multer({
+  dest: '/tmp/',
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB máximo
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || 
+        file.originalname.endsWith('.xlsx')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Solo se permiten archivos XLSX'));
+    }
+  }
+});
 
 // Configuración de Google Sheets
 const auth = new GoogleAuth({
@@ -220,6 +238,92 @@ async function getNextSequenceNumber(sequenceName) {
   } catch (error) {
     console.error(`❌ [getNextSequenceNumber] Error general:`, error.message);
     return parseInt(String(Date.now()).slice(-6));
+  }
+}
+
+// Función para limpiar y escribir datos en Google Sheets
+async function clearAndWriteSheet(nombreHoja, datos) {
+  try {
+    if (!SPREADSHEET_ID) {
+      console.log(`⚠️ Google Sheets no configurado, simulando escritura en ${nombreHoja}`);
+      return { success: true, message: `Datos simulados escritos en ${nombreHoja}` };
+    }
+
+    console.log(`🧹 Limpiando hoja ${nombreHoja}...`);
+    
+    // Limpiar la hoja primero
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${nombreHoja}!A:Z`
+    });
+
+    console.log(`📝 Escribiendo ${datos.length} filas en ${nombreHoja}...`);
+    
+    // Escribir los nuevos datos
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${nombreHoja}!A1`,
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: datos
+      }
+    });
+
+    console.log(`✅ Hoja ${nombreHoja} actualizada exitosamente`);
+    return { 
+      success: true, 
+      message: `${datos.length - 1} registros cargados exitosamente en ${nombreHoja}` 
+    };
+    
+  } catch (error) {
+    console.error(`❌ Error escribiendo en ${nombreHoja}:`, error.message);
+    return { 
+      success: false, 
+      error: `Error actualizando ${nombreHoja}: ${error.message}` 
+    };
+  }
+}
+
+// Función para procesar archivo XLSX
+function processXLSXFile(filePath) {
+  try {
+    console.log(`📊 Procesando archivo XLSX: ${filePath}`);
+    
+    // Leer el archivo XLSX
+    const workbook = XLSX.readFile(filePath);
+    
+    // Obtener la primera hoja
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    
+    console.log(`📋 Procesando hoja: ${sheetName}`);
+    
+    // Convertir a array de arrays
+    const data = XLSX.utils.sheet_to_json(worksheet, { 
+      header: 1,
+      defval: '',
+      raw: false
+    });
+    
+    // Filtrar filas vacías
+    const filteredData = data.filter(row => 
+      row && row.length > 0 && row.some(cell => cell && cell.toString().trim() !== '')
+    );
+    
+    console.log(`✅ ${filteredData.length} filas procesadas (incluyendo encabezados)`);
+    
+    return {
+      success: true,
+      data: filteredData,
+      originalSheetName: sheetName
+    };
+    
+  } catch (error) {
+    console.error(`❌ Error procesando XLSX:`, error.message);
+    return {
+      success: false,
+      error: error.message
+    };
   }
 }
 
@@ -1447,6 +1551,200 @@ app.put('/api/pedidos/:pedidoId/estado', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: error.message 
+    });
+  }
+});
+
+// Endpoint para cargar clientes desde XLSX
+app.post('/api/upload-clientes-xlsx', upload.single('file'), async (req, res) => {
+  try {
+    console.log('📤 Recibiendo archivo XLSX de clientes...');
+    
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No se recibió ningún archivo'
+      });
+    }
+    
+    console.log(`📁 Archivo recibido: ${req.file.originalname} (${req.file.size} bytes)`);
+    
+    // Procesar el archivo XLSX
+    const resultado = processXLSXFile(req.file.path);
+    
+    if (!resultado.success) {
+      return res.status(400).json({
+        success: false,
+        error: resultado.error
+      });
+    }
+    
+    const datos = resultado.data;
+    
+    if (datos.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'El archivo debe tener al menos encabezados y una fila de datos'
+      });
+    }
+    
+    // Validar que tenga las columnas necesarias
+    const encabezados = datos[0];
+    const columnasRequeridas = ['cliente_id', 'nombre'];
+    const columnasFaltantes = columnasRequeridas.filter(col => 
+      !encabezados.some(header => header.toLowerCase() === col.toLowerCase())
+    );
+    
+    if (columnasFaltantes.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Faltan columnas requeridas: ${columnasFaltantes.join(', ')}`
+      });
+    }
+    
+    console.log(`📋 Encabezados encontrados: ${encabezados.join(', ')}`);
+    console.log(`📊 ${datos.length - 1} filas de datos para procesar`);
+    
+    // Escribir datos a Google Sheets
+    const resultadoEscritura = await clearAndWriteSheet('Clientes', datos);
+    
+    // Limpiar archivo temporal
+    try {
+      const fs = await import('fs');
+      fs.unlinkSync(req.file.path);
+      console.log(`🗑️ Archivo temporal eliminado: ${req.file.path}`);
+    } catch (error) {
+      console.log(`⚠️ No se pudo eliminar archivo temporal: ${error.message}`);
+    }
+    
+    if (resultadoEscritura.success) {
+      console.log(`✅ Clientes cargados exitosamente desde ${req.file.originalname}`);
+      res.json({
+        success: true,
+        message: resultadoEscritura.message,
+        registros_procesados: datos.length - 1,
+        archivo_original: req.file.originalname
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: resultadoEscritura.error
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error en upload-clientes-xlsx:', error);
+    
+    // Limpiar archivo temporal en caso de error
+    if (req.file && req.file.path) {
+      try {
+        const fs = await import('fs');
+        fs.unlinkSync(req.file.path);
+      } catch (cleanupError) {
+        console.log(`⚠️ Error limpiando archivo temporal: ${cleanupError.message}`);
+      }
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Endpoint para cargar productos desde XLSX
+app.post('/api/upload-productos-xlsx', upload.single('file'), async (req, res) => {
+  try {
+    console.log('📤 Recibiendo archivo XLSX de productos...');
+    
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No se recibió ningún archivo'
+      });
+    }
+    
+    console.log(`📁 Archivo recibido: ${req.file.originalname} (${req.file.size} bytes)`);
+    
+    // Procesar el archivo XLSX
+    const resultado = processXLSXFile(req.file.path);
+    
+    if (!resultado.success) {
+      return res.status(400).json({
+        success: false,
+        error: resultado.error
+      });
+    }
+    
+    const datos = resultado.data;
+    
+    if (datos.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'El archivo debe tener al menos encabezados y una fila de datos'
+      });
+    }
+    
+    // Validar que tenga las columnas necesarias
+    const encabezados = datos[0];
+    const columnasRequeridas = ['producto_id', 'categoria_id', 'producto_nombre'];
+    const columnasFaltantes = columnasRequeridas.filter(col => 
+      !encabezados.some(header => header.toLowerCase() === col.toLowerCase())
+    );
+    
+    if (columnasFaltantes.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Faltan columnas requeridas: ${columnasFaltantes.join(', ')}`
+      });
+    }
+    
+    console.log(`📋 Encabezados encontrados: ${encabezados.join(', ')}`);
+    console.log(`📊 ${datos.length - 1} filas de datos para procesar`);
+    
+    // Escribir datos a Google Sheets
+    const resultadoEscritura = await clearAndWriteSheet('Productos', datos);
+    
+    // Limpiar archivo temporal
+    try {
+      const fs = await import('fs');
+      fs.unlinkSync(req.file.path);
+      console.log(`🗑️ Archivo temporal eliminado: ${req.file.path}`);
+    } catch (error) {
+      console.log(`⚠️ No se pudo eliminar archivo temporal: ${error.message}`);
+    }
+    
+    if (resultadoEscritura.success) {
+      console.log(`✅ Productos cargados exitosamente desde ${req.file.originalname}`);
+      res.json({
+        success: true,
+        message: resultadoEscritura.message,
+        registros_procesados: datos.length - 1,
+        archivo_original: req.file.originalname
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: resultadoEscritura.error
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error en upload-productos-xlsx:', error);
+    
+    // Limpiar archivo temporal en caso de error
+    if (req.file && req.file.path) {
+      try {
+        const fs = await import('fs');
+        fs.unlinkSync(req.file.path);
+      } catch (cleanupError) {
+        console.log(`⚠️ Error limpiando archivo temporal: ${cleanupError.message}`);
+      }
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
