@@ -1,13 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import { Telegraf } from 'telegraf';
-import { GoogleAuth } from 'google-auth-library';
-import { google } from 'googleapis';
+import { createPool } from 'mysql2/promise';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import multer from 'multer';
-import xlsx from 'xlsx';
 
 dotenv.config();
 
@@ -22,33 +19,49 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Configurar multer para carga de archivos
-const upload = multer({
-  dest: '/tmp/',
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB máximo
-  },
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || 
-        file.originalname.endsWith('.xlsx')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Solo se permiten archivos XLSX'));
-    }
+// Configuración de MySQL
+const pool = createPool({
+  host: process.env.MYSQL_HOST,
+  user: process.env.MYSQL_USER,
+  password: process.env.MYSQL_PASSWORD,
+  database: process.env.MYSQL_DATABASE,
+  port: process.env.MYSQL_PORT || 3306,
+  acquireTimeout: 5000,
+  timeout: 5000,
+  queueLimit: 0,
+  acquireTimeout: 5000,
+  timeout: 5000,
+  connectTimeout: 5000,
+  reconnect: true,
+  ssl: false
+});
+
+// Función para verificar conexión MySQL
+async function verificarConexionMySQL() {
+  try {
+    await pool.execute('SELECT 1');
+    return true;
+  } catch (error) {
+    console.error('❌ Error conectando a MySQL:', error.code || error.message);
+    return false;
   }
-});
+}
 
-// Configuración de Google Sheets
-const auth = new GoogleAuth({
-  credentials: {
-    client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-  },
-  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-});
-
-const sheets = google.sheets({ version: 'v4', auth });
-const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID;
+// Datos de ejemplo como fallback
+const datosEjemplo = {
+  Clientes: [
+    { cliente_id: 1, nombre: 'Cliente Demo 1', lista: 1, localidad: 'Centro' },
+    { cliente_id: 2, nombre: 'Cliente Demo 2', lista: 2, localidad: 'Norte' }
+  ],
+  Categorias: [
+    { categoria_id: 1, categoria_nombre: 'Bebidas' },
+    { categoria_id: 2, categoria_nombre: 'Snacks' }
+  ],
+  Productos: [
+    { producto_id: 1, categoria_id: 1, producto_nombre: 'Coca Cola', precio1: 100, precio2: 95, precio3: 90, precio4: 85, precio5: 80, activo: 'SI' },
+    { producto_id: 2, categoria_id: 2, producto_nombre: 'Papas Fritas', precio1: 50, precio2: 48, precio3: 45, precio4: 42, precio5: 40, activo: 'SI' }
+  ]
+};
 
 // Bot de Telegram
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN || 'dummy_token');
@@ -83,79 +96,94 @@ function setSearchState(userId, state) {
   searchStates.set(userId, state);
 }
 
-// Función para obtener datos de Google Sheets
-async function obtenerDatosSheet(nombreHoja) {
+// Función para obtener datos de MySQL
+async function obtenerDatosMySQL(tabla) {
+  // Verificar conexión primero
+  const conexionDisponible = await verificarConexionMySQL();
+  if (!conexionDisponible) {
+    console.log(`⚠️ MySQL no disponible, usando datos de ejemplo para ${tabla}`);
+    return datosEjemplo[tabla] || [];
+  }
+
   try {
-    if (!SPREADSHEET_ID) {
-      console.log(`⚠️ Google Sheets no configurado`);
-      return [];
+    console.log(`📊 Obteniendo datos de MySQL: ${tabla}...`);
+    
+    let query;
+    switch (tabla) {
+      case 'Clientes':
+        query = 'SELECT cliente_id, nombre, lista, localidad FROM Clientes ORDER BY nombre';
+        break;
+      case 'Categorias':
+        query = 'SELECT categoria_id, categoria_nombre FROM Categorias ORDER BY categoria_nombre';
+        break;
+      case 'Productos':
+        query = 'SELECT producto_id, categoria_id, producto_nombre, precio1, precio2, precio3, precio4, precio5, activo FROM Productos WHERE activo = "SI" ORDER BY producto_nombre';
+        break;
+      case 'Pedidos':
+        query = 'SELECT pedido_id, fecha_hora, cliente_id, cliente_nombre, items_cantidad, total, estado, observacion FROM Pedidos ORDER BY fecha_hora DESC';
+        break;
+      case 'DetallePedidos':
+        query = 'SELECT detalle_id, pedido_id, producto_id, producto_nombre, categoria_id, cantidad, precio_unitario, importe, observaciones FROM DetallePedidos ORDER BY pedido_id, detalle_id';
+        break;
+      default:
+        throw new Error(`Tabla no reconocida: ${tabla}`);
     }
-
-    console.log(`📊 [obtenerDatosSheet] Iniciando obtención de ${nombreHoja}...`);
     
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${nombreHoja}!A:Z`,
-    });
-
-    const rows = response.data.values || [];
-    console.log(`📋 [obtenerDatosSheet] ${nombreHoja}: ${rows.length} filas obtenidas`);
+    const connection = await pool.getConnection();
+    try {
+      const [rows] = await connection.execute(query);
+      console.log(`✅ ${tabla}: ${rows.length} registros obtenidos`);
+      return rows;
+    } finally {
+      connection.release();
+    }
     
-    if (rows.length === 0) return [];
-
-    const headers = rows[0];
-    console.log(`📋 [obtenerDatosSheet] Encabezados de ${nombreHoja}:`, headers);
-    
-    const data = rows.slice(1)
-      .filter(row => row && row.length > 0 && row[0] && row[0].toString().trim())
-      .map(row => {
-        const obj = {};
-        headers.forEach((header, index) => {
-          obj[header] = row[index] ? row[index].toString().trim() : '';
-        });
-        return obj;
-      })
-      .filter(obj => {
-        if (nombreHoja === 'Clientes') {
-          return obj.cliente_id && obj.nombre && obj.nombre !== '';
-        }
-        if (nombreHoja === 'Categorias') {
-          return obj.categoria_id && obj.categoria_nombre && obj.categoria_nombre !== '';
-        }
-        if (nombreHoja === 'Productos') {
-          return obj.producto_id && obj.producto_nombre && obj.producto_nombre !== '';
-        }
-        return Object.values(obj).some(val => val && val !== '');
-      });
-
-    console.log(`✅ [obtenerDatosSheet] ${nombreHoja}: ${data.length} registros válidos procesados`);
-    return data;
   } catch (error) {
-    console.error(`❌ Error ${nombreHoja}:`, error.message);
-    return [];
+    console.error(`❌ Error obteniendo datos de ${tabla}:`, error.code || error.message);
+    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+      console.error('🔌 Problema de conexión con MySQL. Verifica la configuración de red.');
+      console.log(`⚠️ Usando datos de ejemplo para ${tabla}`);
+      return datosEjemplo[tabla] || [];
+    }
+    return datosEjemplo[tabla] || [];
   }
 }
 
-// Función para agregar datos a Google Sheets
-async function agregarDatosSheet(nombreHoja, datos) {
+// Función para agregar datos a MySQL
+async function agregarDatosMySQL(tabla, datos) {
   try {
-    if (!SPREADSHEET_ID) {
-      console.log(`⚠️ Google Sheets no configurado, simulando inserción en ${nombreHoja}`);
-      return true;
+    console.log(`📝 Agregando datos a MySQL: ${tabla}...`);
+    
+    let query;
+    let values;
+    
+    switch (tabla) {
+      case 'Pedidos':
+        query = `INSERT INTO Pedidos (pedido_id, fecha_hora, cliente_id, cliente_nombre, items_cantidad, total, estado, observacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+        values = datos;
+        break;
+      case 'DetallePedidos':
+        query = `INSERT INTO DetallePedidos (detalle_id, pedido_id, producto_id, producto_nombre, categoria_id, cantidad, precio_unitario, importe, observaciones) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+        values = datos;
+        break;
+      default:
+        throw new Error(`Tabla no soportada para inserción: ${tabla}`);
     }
-
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${nombreHoja}!A:Z`,
-      valueInputOption: 'RAW',
-      requestBody: {
-        values: [datos]
-      }
-    });
-
-    return true;
+    
+    const connection = await pool.getConnection();
+    try {
+      await connection.execute(query, values);
+      console.log(`✅ Datos agregados a ${tabla} exitosamente`);
+      return true;
+    } finally {
+      connection.release();
+    }
+    
   } catch (error) {
-    console.error(`❌ Error agregando datos a ${nombreHoja}:`, error.message);
+    console.error(`❌ Error agregando datos a ${tabla}:`, error.code || error.message);
+    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED') {
+      console.error('🔌 Problema de conexión con MySQL. Verifica la configuración de red.');
+    }
     return false;
   }
 }
@@ -169,161 +197,35 @@ function calcularPrecio(producto, listaCliente) {
 // Función para generar ID de pedido autoincremental
 async function generarPedidoId() {
   try {
-    console.log('🔢 [generarPedidoId] Iniciando generación de ID único...');
+    console.log('🔢 Generando nuevo ID de pedido...');
     
-    const nuevoNumero = await getNextSequenceNumber('pedido_counter');
-    const pedidoId = `PD${String(nuevoNumero).padStart(6, '0')}`;
-    
-    console.log(`✅ [generarPedidoId] ID generado: ${pedidoId}`);
-    return pedidoId;
-    
-  } catch (error) {
-    console.error('❌ [generarPedidoId] Error:', error);
-    // Fallback con timestamp para garantizar unicidad
-    const fallbackId = `PD${String(Date.now()).slice(-6).padStart(6, '0')}`;
-    console.log(`🔄 [generarPedidoId] Usando fallback: ${fallbackId}`);
-    return fallbackId;
-  }
-}
-
-// Función para obtener el siguiente número de secuencia (thread-safe)
-async function getNextSequenceNumber(sequenceName) {
-  try {
-    if (!SPREADSHEET_ID) {
-      console.log('⚠️ [getNextSequenceNumber] Google Sheets no configurado, usando timestamp');
-      return parseInt(String(Date.now()).slice(-6));
-    }
-
-    console.log(`🔢 [getNextSequenceNumber] Obteniendo secuencia: ${sequenceName}`);
-    
-    // Intentar leer el valor actual de la secuencia
-    let valorActual = 0;
+    const connection = await pool.getConnection();
     try {
-      const response = await sheets.spreadsheets.values.get({
-        spreadsheetId: SPREADSHEET_ID,
-        range: 'Configuracion!A1',
-      });
+      const [rows] = await connection.execute(
+        'SELECT pedido_id FROM Pedidos WHERE pedido_id LIKE "PD%" ORDER BY pedido_id DESC LIMIT 1'
+      );
       
-      if (response.data.values && response.data.values[0] && response.data.values[0][0]) {
-        valorActual = parseInt(response.data.values[0][0]) || 0;
-      }
-      
-      console.log(`📊 [getNextSequenceNumber] Valor actual: ${valorActual}`);
-    } catch (error) {
-      console.log(`⚠️ [getNextSequenceNumber] No se pudo leer secuencia, iniciando en 0:`, error.message);
-    }
-    
-    // Incrementar y guardar el nuevo valor
-    const nuevoValor = valorActual + 1;
-    
-    try {
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
-        range: 'Configuracion!A1',
-        valueInputOption: 'RAW',
-        requestBody: {
-          values: [[nuevoValor]]
+      let ultimoNumero = 0;
+      if (rows.length > 0) {
+        const ultimoPedidoId = rows[0].pedido_id;
+        if (ultimoPedidoId && ultimoPedidoId.startsWith('PD')) {
+          ultimoNumero = parseInt(ultimoPedidoId.replace('PD', ''));
         }
-      });
-      
-      console.log(`✅ [getNextSequenceNumber] Secuencia actualizada: ${valorActual} → ${nuevoValor}`);
-      return nuevoValor;
-      
-    } catch (error) {
-      console.error(`❌ [getNextSequenceNumber] Error actualizando secuencia:`, error.message);
-      // Fallback con timestamp si no se puede actualizar
-      return parseInt(String(Date.now()).slice(-6));
-    }
-    
-  } catch (error) {
-    console.error(`❌ [getNextSequenceNumber] Error general:`, error.message);
-    return parseInt(String(Date.now()).slice(-6));
-  }
-}
-
-// Función para limpiar y escribir datos en Google Sheets
-async function clearAndWriteSheet(nombreHoja, datos) {
-  try {
-    if (!SPREADSHEET_ID) {
-      console.log(`⚠️ Google Sheets no configurado, simulando escritura en ${nombreHoja}`);
-      return { success: true, message: `Datos simulados escritos en ${nombreHoja}` };
-    }
-
-    console.log(`🧹 Limpiando hoja ${nombreHoja}...`);
-    
-    // Limpiar la hoja primero
-    await sheets.spreadsheets.values.clear({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${nombreHoja}!A:Z`
-    });
-
-    console.log(`📝 Escribiendo ${datos.length} filas en ${nombreHoja}...`);
-    
-    // Escribir los nuevos datos
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${nombreHoja}!A1`,
-      valueInputOption: 'RAW',
-      requestBody: {
-        values: datos
       }
-    });
-
-    console.log(`✅ Hoja ${nombreHoja} actualizada exitosamente`);
-    return { 
-      success: true, 
-      message: `${datos.length - 1} registros cargados exitosamente en ${nombreHoja}` 
-    };
+      
+      const nuevoNumero = ultimoNumero + 1;
+      const nuevoPedidoId = `PD${String(nuevoNumero).padStart(6, '0')}`;
+      
+      console.log(`✅ Nuevo ID generado: ${nuevoPedidoId}`);
+      return nuevoPedidoId;
+      
+    } finally {
+      connection.release();
+    }
     
   } catch (error) {
-    console.error(`❌ Error escribiendo en ${nombreHoja}:`, error.message);
-    return { 
-      success: false, 
-      error: `Error actualizando ${nombreHoja}: ${error.message}` 
-    };
-  }
-}
-
-// Función para procesar archivo XLSX
-function processXLSXFile(filePath) {
-  try {
-    console.log(`📊 Procesando archivo XLSX: ${filePath}`);
-    
-    // Leer el archivo XLSX
-    const workbook = XLSX.readFile(filePath);
-    
-    // Obtener la primera hoja
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    
-    console.log(`📋 Procesando hoja: ${sheetName}`);
-    
-    // Convertir a array de arrays
-    const data = XLSX.utils.sheet_to_json(worksheet, { 
-      header: 1,
-      defval: '',
-      raw: false
-    });
-    
-    // Filtrar filas vacías
-    const filteredData = data.filter(row => 
-      row && row.length > 0 && row.some(cell => cell && cell.toString().trim() !== '')
-    );
-    
-    console.log(`✅ ${filteredData.length} filas procesadas (incluyendo encabezados)`);
-    
-    return {
-      success: true,
-      data: filteredData,
-      originalSheetName: sheetName
-    };
-    
-  } catch (error) {
-    console.error(`❌ Error procesando XLSX:`, error.message);
-    return {
-      success: false,
-      error: error.message
-    };
+    console.error('❌ Error generando ID:', error.code || error.message);
+    return `PD${String(Date.now()).slice(-6).padStart(6, '0')}`;
   }
 }
 
@@ -340,238 +242,6 @@ function agruparClientesPorLocalidad(clientes) {
   });
   
   return agrupados;
-}
-
-// Función para buscar productos
-function buscarProductos(productos, termino, categoriaId = null) {
-  console.log(`🔍 [buscarProductos] Buscando "${termino}" en ${productos.length} productos`);
-  
-  if (!Array.isArray(productos)) {
-    console.log(`⚠️ [buscarProductos] productos no es array:`, typeof productos);
-    return [];
-  }
-  
-  const terminoLower = termino.toLowerCase().trim();
-  
-  const resultados = productos.filter(producto => {
-    const nombre = (producto.producto_nombre || '').toLowerCase();
-    const enCategoria = !categoriaId || producto.categoria_id == categoriaId;
-    const activo = producto.activo === 'SI';
-    const coincideNombre = nombre.includes(terminoLower);
-    const coincideId = producto.producto_id && producto.producto_id.toString().includes(termino);
-    
-    return (coincideNombre || coincideId) && enCategoria && activo;
-  });
-  
-  console.log(`✅ [buscarProductos] ${resultados.length} productos encontrados`);
-  return resultados;
-}
-
-// Función para mostrar productos con paginación
-async function mostrarProductosPaginados(ctx, productos, pagina = 1, categoriaId = null, termino = null) {
-  console.log(`📄 [mostrarProductosPaginados] Página ${pagina}, categoría ${categoriaId}, término "${termino}"`);
-  console.log(`📄 [mostrarProductosPaginados] Tipo de productos:`, typeof productos);
-  
-  if (!Array.isArray(productos)) {
-    console.log(`⚠️ [mostrarProductosPaginados] productos no es array:`, typeof productos);
-    productos = [];
-  }
-  
-  const productosPorPagina = 8;
-  const inicio = (pagina - 1) * productosPorPagina;
-  const fin = inicio + productosPorPagina;
-  const productosEnPagina = productos.slice(inicio, fin);
-  const totalPaginas = Math.ceil(productos.length / productosPorPagina);
-  
-  console.log(`📄 [mostrarProductosPaginados] Mostrando ${productosEnPagina.length} productos (${inicio}-${fin} de ${productos.length})`);
-  
-  if (productosEnPagina.length === 0) {
-    const mensaje = termino ? 
-      `❌ No se encontraron productos con "${termino}"` : 
-      '❌ No hay productos disponibles en esta categoría';
-    
-    const keyboard = [];
-    if (categoriaId) {
-      keyboard.push([{ text: '🔙 Volver a categorías', callback_data: 'seguir_comprando' }]);
-    }
-    
-    if (ctx.callbackQuery) {
-      await ctx.editMessageText(mensaje, {
-        reply_markup: { inline_keyboard: keyboard }
-      });
-    } else {
-      await ctx.reply(mensaje, {
-        reply_markup: { inline_keyboard: keyboard }
-      });
-    }
-    return;
-  }
-  
-  const keyboard = [];
-  
-  productosEnPagina.forEach(producto => {
-    const nombreCorto = producto.producto_nombre.length > 35 ? 
-      producto.producto_nombre.substring(0, 32) + '...' : 
-      producto.producto_nombre;
-    
-    keyboard.push([{
-      text: `🛍️ ${nombreCorto}`,
-      callback_data: `prod|${producto.producto_id}|${pagina}|${categoriaId || 0}`
-    }]);
-  });
-  
-  const navButtons = [];
-  
-  if (totalPaginas > 1) {
-    if (pagina > 1) {
-      navButtons.push({
-        text: '⬅️ Anterior',
-        callback_data: `cat|${categoriaId || 0}|${pagina - 1}`
-      });
-    }
-    
-    navButtons.push({
-      text: `📄 ${pagina}/${totalPaginas}`,
-      callback_data: 'noop'
-    });
-    
-    if (pagina < totalPaginas) {
-      navButtons.push({
-        text: 'Siguiente ➡️',
-        callback_data: `cat|${categoriaId || 0}|${pagina + 1}`
-      });
-    }
-    
-    keyboard.push(navButtons);
-  }
-  
-  keyboard.push([
-    { text: '🔍 Buscar', callback_data: `buscar|${categoriaId || 0}` },
-    { text: '🛒 Carrito', callback_data: 'ver_carrito' }
-  ]);
-  
-  keyboard.push([{ text: '🔙 Categorías', callback_data: 'seguir_comprando' }]);
-  
-  const categorias = await obtenerDatosSheet('Categorias');
-  const categoria = categorias.find(c => c.categoria_id == categoriaId);
-  const nombreCategoria = categoria ? categoria.categoria_nombre : 'Productos';
-  
-  let mensaje = `📂 ${nombreCategoria}\n`;
-  if (termino) {
-    mensaje += `🔍 Búsqueda: "${termino}"\n`;
-  }
-  mensaje += `📄 Página ${pagina}/${totalPaginas} (${productos.length} productos)\n\n`;
-  mensaje += `🛍️ Selecciona un producto:`;
-  
-  if (ctx.callbackQuery) {
-    await ctx.editMessageText(mensaje, {
-      reply_markup: { inline_keyboard: keyboard }
-    });
-  } else {
-    await ctx.reply(mensaje, {
-      reply_markup: { inline_keyboard: keyboard }
-    });
-  }
-}
-
-// Función para agregar producto al carrito
-function agregarProductoAlCarrito(userId, producto, cantidad, precio) {
-  const cart = getUserCart(userId);
-  
-  const existingIndex = cart.findIndex(item => item.producto_id == producto.producto_id);
-  
-  if (existingIndex !== -1) {
-    const nuevaCantidad = cart[existingIndex].cantidad + cantidad;
-    
-    if (nuevaCantidad > 999) {
-      return { success: false, message: 'Cantidad máxima excedida (999 unidades)' };
-    }
-    
-    cart[existingIndex].cantidad = nuevaCantidad;
-    cart[existingIndex].importe = cart[existingIndex].precio_unitario * nuevaCantidad;
-  } else {
-    const importe = precio * cantidad;
-    cart.push({
-      producto_id: producto.producto_id,
-      producto_nombre: producto.producto_nombre,
-      categoria_id: producto.categoria_id,
-      cantidad: cantidad,
-      precio_unitario: precio,
-      importe: importe
-    });
-  }
-  
-  setUserCart(userId, cart);
-  
-  const totalItems = cart.reduce((sum, item) => sum + item.cantidad, 0);
-  const totalImporte = cart.reduce((sum, item) => sum + item.importe, 0);
-  
-  return {
-    success: true,
-    totalItems,
-    totalImporte,
-    message: existingIndex !== -1 ? 'Cantidad actualizada en el carrito' : 'Producto agregado al carrito'
-  };
-}
-
-// Función para mostrar el carrito (modo normal o edición)
-async function displayCart(ctx, userId, isEditing = false) {
-  const cart = getUserCart(userId);
-  
-  if (cart.length === 0) {
-    await ctx.editMessageText('🛒 Tu carrito está vacío', {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
-        ]
-      }
-    });
-    return;
-  }
-  
-  let mensaje = isEditing ? '✏️ *Editando carrito:*\n\n' : '🛒 *Tu carrito:*\n\n';
-  let total = 0;
-  
-  cart.forEach((item, index) => {
-    mensaje += `${index + 1}. *${item.producto_nombre}*\n`;
-    mensaje += `   📦 Cantidad: ${item.cantidad}\n`;
-    mensaje += `   💰 $${item.precio_unitario.toLocaleString()} c/u = $${item.importe.toLocaleString()}\n\n`;
-    total += item.importe;
-  });
-  
-  mensaje += `💰 *Total: $${total.toLocaleString()}*`;
-  
-  const keyboard = [];
-  
-  if (isEditing) {
-    // Modo edición: mostrar controles para cada producto
-    cart.forEach((item, index) => {
-      const nombreCorto = item.producto_nombre.length > 20 ? 
-        item.producto_nombre.substring(0, 17) + '...' : 
-        item.producto_nombre;
-      
-      keyboard.push([
-        { text: '➖', callback_data: `edit_qty_minus|${index}` },
-        { text: `${item.cantidad} ${nombreCorto}`, callback_data: 'noop' },
-        { text: '➕', callback_data: `edit_qty_plus|${index}` },
-        { text: '🗑️', callback_data: `remove_item|${index}` }
-      ]);
-    });
-    
-    keyboard.push([{ text: '✅ Terminar edición', callback_data: 'done_editing_cart' }]);
-    
-  } else {
-    // Modo normal: mostrar botones estándar
-    keyboard.push([{ text: '✏️ Editar carrito', callback_data: 'edit_cart' }]);
-    keyboard.push([{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }]);
-    keyboard.push([{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]);
-    keyboard.push([{ text: '🗑️ Vaciar carrito', callback_data: 'empty_cart' }]);
-  }
-  
-  await ctx.editMessageText(mensaje, {
-    parse_mode: 'Markdown',
-    reply_markup: { inline_keyboard: keyboard }
-  });
 }
 
 // Comandos del bot
@@ -626,7 +296,7 @@ bot.on('callback_query', async (ctx) => {
     if (callbackData === 'hacer_pedido') {
       console.log(`🛒 ${userName} inicia pedido`);
       
-      const clientes = await obtenerDatosSheet('Clientes');
+      const clientes = await obtenerDatosMySQL('Clientes');
       
       if (clientes.length === 0) {
         await ctx.reply('❌ No hay clientes disponibles');
@@ -636,13 +306,20 @@ bot.on('callback_query', async (ctx) => {
       console.log(`👥 ${clientes.length} clientes disponibles`);
       setUserState(userId, { step: 'seleccionar_cliente' });
       
+      // Agrupar clientes por localidad
       const clientesAgrupados = agruparClientesPorLocalidad(clientes);
       const localidades = Object.keys(clientesAgrupados);
       
+      // Crear keyboard con búsqueda primero, luego localidades
       const keyboard = [];
+      
+      // Botón de búsqueda al inicio
       keyboard.push([{ text: '🔍 Buscar cliente', callback_data: 'buscar_cliente' }]);
+      
+      // Separador visual
       keyboard.push([{ text: '📍 ── LOCALIDADES ──', callback_data: 'separator' }]);
       
+      // Agregar cada localidad
       localidades.forEach(localidad => {
         const cantidadClientes = clientesAgrupados[localidad].length;
         keyboard.push([{
@@ -655,97 +332,27 @@ bot.on('callback_query', async (ctx) => {
         reply_markup: { inline_keyboard: keyboard }
       });
       
-    } else if (callbackData.startsWith('localidad_')) {
-      const localidad = decodeURIComponent(callbackData.split('_')[1]);
-      console.log(`📍 Localidad seleccionada: ${localidad}`);
-      
-      const clientes = await obtenerDatosSheet('Clientes');
-      
-      // --- LOGS DE DEPURACIÓN DETALLADOS ---
-      console.log(`DEBUG: Total de clientes obtenidos de la hoja: ${clientes.length}`);
-      console.log(`DEBUG: Tipo de datos clientes:`, typeof clientes, Array.isArray(clientes));
-      
-      if (clientes.length > 0) {
-        console.log(`DEBUG: Primeros 3 clientes (estructura):`);
-        clientes.slice(0, 3).forEach((c, i) => {
-          console.log(`  ${i+1}. ID: ${c.cliente_id}, Nombre: "${c.nombre}", Localidad: "${c.localidad}"`);
-        });
-      }
-      
-      console.log(`DEBUG: Buscando clientes para localidad: "${localidad}"`);
-      
-      const clientesLocalidad = clientes.filter(cliente => {
-        const clienteLocalidad = (cliente.localidad || '').toString().trim();
-        const localidadBuscada = localidad.toString().trim();
-        
-        console.log(`DEBUG: Comparando "${clienteLocalidad}" === "${localidadBuscada}" = ${clienteLocalidad === localidadBuscada}`);
-        
-        return clienteLocalidad === localidadBuscada;
-      });
-      
-      console.log(`DEBUG: Clientes encontrados para "${localidad}": ${clientesLocalidad.length}`);
-      if (clientesLocalidad.length > 0) {
-        console.log(`DEBUG: Nombres de clientes encontrados:`, clientesLocalidad.map(c => c.nombre));
-      } else {
-        console.log(`DEBUG: ❌ NO se encontraron clientes para "${localidad}"`);
-        console.log(`DEBUG: Localidades disponibles en los datos:`, [...new Set(clientes.map(c => c.localidad || 'Sin localidad'))]);
-      }
-      // --- FIN LOGS DE DEPURACIÓN ---
-      
-      if (clientesLocalidad.length === 0) {
-        console.log(`❌ No hay clientes en localidad "${localidad}"`);
-        await ctx.reply(`❌ No se encontraron clientes en "${localidad}". Verifica la hoja de Google Sheets.`, {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '🔙 Volver a localidades', callback_data: 'hacer_pedido' }]
-            ]
-          }
-        });
-        return;
-      }
-      
-      const keyboard = clientesLocalidad.map(cliente => {
-        const nombreCliente = cliente.nombre || cliente.Nombre || `Cliente ${cliente.cliente_id}`;
-        const clienteId = cliente.cliente_id || cliente.Cliente_id || cliente.id;
-        
-        return [{
-          text: `👤 ${nombreCliente}`,
-          callback_data: `cliente_${clienteId}`
-        }];
-      });
-      
-      keyboard.push([{ text: '🔙 Volver a localidades', callback_data: 'hacer_pedido' }]);
-      
-      await ctx.editMessageText(`📍 Clientes en ${localidad}:`, {
-        reply_markup: { inline_keyboard: keyboard }
-      });
-      
     } else if (callbackData === 'seguir_comprando') {
       const userState = getUserState(userId);
       const cliente = userState.cliente;
       const cart = getUserCart(userId);
       
       if (!cliente) {
-        await ctx.reply('❌ Debes seleccionar un cliente primero', {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '🛒 Hacer pedido', callback_data: 'hacer_pedido' }]
-            ]
-          }
+        return bot.handleUpdate({
+          callback_query: { ...ctx.callbackQuery, data: 'hacer_pedido' }
         });
-        return;
       }
       
       console.log(`🛒 ${userName} sigue comprando para ${cliente.nombre}`);
       
-      const categorias = await obtenerDatosSheet('Categorias');
+      const categorias = await obtenerDatosMySQL('Categorias');
       
       const keyboard = categorias.map(cat => [{
-        text: `📂 ${cat.categoria_nombre || 'Categoría'}`,
-        callback_data: `cat|${cat.categoria_id}|1`
+        text: `📂 ${cat.categoria_nombre}`,
+        callback_data: `categoria_${cat.categoria_id}`
       }]);
       
-      keyboard.push([{ text: '🔍 Buscar producto', callback_data: 'buscar|0' }]);
+      keyboard.push([{ text: '🔍 Buscar producto', callback_data: 'buscar_producto_general' }]);
       keyboard.push([{ text: '🛒 Ver carrito', callback_data: 'ver_carrito' }]);
       
       const cartInfo = cart.length > 0 ? ` (${cart.length} productos)` : '';
@@ -754,93 +361,169 @@ bot.on('callback_query', async (ctx) => {
         reply_markup: { inline_keyboard: keyboard }
       });
       
+    } else if (callbackData === 'buscar_cliente') {
+      console.log(`🔍 ${userName} inicia búsqueda de cliente`);
+      setUserState(userId, { step: 'buscar_cliente' });
+      await ctx.editMessageText('🔍 Escribe el nombre del cliente que buscas:');
+      
     } else if (callbackData.startsWith('cliente_')) {
       const clienteId = parseInt(callbackData.split('_')[1]);
       console.log(`👤 Cliente: ${clienteId}`);
       
-      const clientes = await obtenerDatosSheet('Clientes');
-      const cliente = clientes.find(c => 
-        (c.cliente_id == clienteId) || 
-        (c.Cliente_id == clienteId) || 
-        (c.id == clienteId)
-      );
+      const clientes = await obtenerDatosMySQL('Clientes');
+      const cliente = clientes.find(c => c.cliente_id == clienteId);
       
       if (!cliente) {
         await ctx.reply('❌ Cliente no encontrado');
         return;
       }
       
-      const nombreCliente = cliente.nombre || cliente.Nombre || 'Cliente';
-      const clienteNormalizado = {
-        ...cliente,
-        nombre: nombreCliente
-      };
-      
       setUserState(userId, { 
         step: 'seleccionar_categoria', 
-        cliente: clienteNormalizado,
+        cliente: cliente,
         pedido_id: await generarPedidoId()
       });
       
-      const categorias = await obtenerDatosSheet('Categorias');
+      const categorias = await obtenerDatosMySQL('Categorias');
       
       const keyboard = categorias.map(cat => [{
-        text: `📂 ${cat.categoria_nombre || 'Categoría'}`,
-        callback_data: `cat|${cat.categoria_id}|1`
+        text: `📂 ${cat.categoria_nombre}`,
+        callback_data: `categoria_${cat.categoria_id}`
       }]);
       
-      keyboard.push([{ text: '🔍 Buscar producto', callback_data: 'buscar|0' }]);
+      keyboard.push([{ text: '🔍 Buscar producto', callback_data: 'buscar_producto_general' }]);
       keyboard.push([{ text: '🛒 Ver carrito', callback_data: 'ver_carrito' }]);
       
-      await ctx.editMessageText(`✅ Cliente: ${nombreCliente}\n\n📂 Selecciona una categoría:`, {
+      await ctx.editMessageText(`✅ Cliente: ${cliente.nombre}\n\n📂 Selecciona una categoría:`, {
         reply_markup: { inline_keyboard: keyboard }
       });
       
-    } else if (callbackData.startsWith('cat|')) {
-      const [, categoriaId, pagina] = callbackData.split('|').map(Number);
-      console.log(`📂 Categoría: ${categoriaId}, Página: ${pagina}`);
+    } else if (callbackData.startsWith('localidad_')) {
+      const localidad = decodeURIComponent(callbackData.split('_')[1]);
+      console.log(`📍 Localidad seleccionada: ${localidad}`);
       
-      const productos = await obtenerDatosSheet('Productos');
-      console.log(`📦 [callback cat] Productos obtenidos:`, typeof productos, Array.isArray(productos) ? productos.length : 'no es array');
+      const clientes = await obtenerDatosMySQL('Clientes');
+      const clientesLocalidad = clientes.filter(cliente => 
+        (cliente.localidad || 'Sin localidad') === localidad
+      );
       
-      const productosCategoria = Array.isArray(productos) ? 
-        productos.filter(p => p.categoria_id == categoriaId && p.activo === 'SI') : [];
+      if (clientesLocalidad.length === 0) {
+        await ctx.reply('❌ No hay clientes en esta localidad');
+        return;
+      }
       
-      await mostrarProductosPaginados(ctx, productosCategoria, pagina, categoriaId);
+      const keyboard = clientesLocalidad.map(cliente => ({
+        text: `👤 ${cliente.nombre}`,
+        callback_data: `cliente_${cliente.cliente_id}`
+      })).map(btn => [btn]);
       
-    } else if (callbackData.startsWith('prod|')) {
-      const parts = callbackData.split('|');
-      const productoId = parseInt(parts[1]);
-      const paginaAnterior = parseInt(parts[2]);
-      const categoriaId = parseInt(parts[3]);
+      // Botón para volver a localidades
+      keyboard.push([{ text: '🔙 Volver a localidades', callback_data: 'hacer_pedido' }]);
       
-      console.log(`🔢 [custom] Cantidad personalizada para producto ${productoId}`);
+      await ctx.editMessageText(`📍 ${localidad} - Selecciona el cliente:`, {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (callbackData === 'separator') {
+      // No hacer nada, es solo visual
+      return;
+      
+    } else if (callbackData.startsWith('categoria_')) {
+      const categoriaId = parseInt(callbackData.split('_')[1]);
+      console.log(`📂 Categoría: ${categoriaId}`);
+      
+      const connection = await pool.getConnection();
+      let productos = [];
+      try {
+        const [result] = await connection.execute(
+          'SELECT producto_id, categoria_id, producto_nombre, precio1, precio2, precio3, precio4, precio5 FROM Productos WHERE categoria_id = ? AND activo = "SI" ORDER BY producto_nombre',
+          [categoriaId]
+        );
+        productos = result;
+      } catch (error) {
+        console.error('❌ Error obteniendo productos:', error.code || error.message);
+        await ctx.reply('❌ Error obteniendo productos. Intenta nuevamente.');
+        return;
+      } finally {
+        connection.release();
+      }
+      
+      if (productos.length === 0) {
+        await ctx.reply('❌ No hay productos disponibles en esta categoría');
+        return;
+      }
+      
+      const connection2 = await pool.getConnection();
+      let categorias = [];
+      try {
+        const [result] = await connection2.execute(
+          'SELECT categoria_nombre FROM Categorias WHERE categoria_id = ?',
+          [categoriaId]
+        );
+        categorias = result;
+      } catch (error) {
+        console.error('❌ Error obteniendo categoría:', error.code || error.message);
+      } finally {
+        connection2.release();
+      }
+      
+      const nombreCategoria = categorias.length > 0 ? categorias[0].categoria_nombre : 'Categoría';
+      
+      const keyboard = productos.map(producto => [{
+        text: `🛍️ ${producto.producto_nombre}`,
+        callback_data: `producto_${producto.producto_id}`
+      }]);
+      
+      keyboard.push([{ text: '🔍 Buscar producto', callback_data: `buscar_producto_${categoriaId}` }]);
+      keyboard.push([{ text: '📂 Ver categorías', callback_data: 'seguir_comprando' }]);
+      keyboard.push([{ text: '🛒 Ver carrito', callback_data: 'ver_carrito' }]);
+      
+      await ctx.editMessageText(`📂 Categoría: ${nombreCategoria}\n\n🛍️ Selecciona un producto:`, {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (callbackData.startsWith('producto_')) {
+      const productoId = parseInt(callbackData.split('_')[1]);
       console.log(`🛍️ Producto: ${productoId}`);
       
-      const productos = await obtenerDatosSheet('Productos');
-      const producto = productos.find(p => p.producto_id == productoId);
+      const connection = await pool.getConnection();
+      let productos = [];
+      try {
+        const [result] = await connection.execute(
+          'SELECT producto_id, categoria_id, producto_nombre, precio1, precio2, precio3, precio4, precio5 FROM Productos WHERE producto_id = ?',
+          [productoId]
+        );
+        productos = result;
+      } catch (error) {
+        console.error('❌ Error obteniendo producto:', error.code || error.message);
+        await ctx.reply('❌ Error obteniendo producto. Intenta nuevamente.');
+        return;
+      } finally {
+        connection.release();
+      }
       
-      if (!producto) {
+      if (productos.length === 0) {
         await ctx.reply('❌ Producto no encontrado');
         return;
       }
       
+      const producto = productos[0];
       const userState = getUserState(userId);
       const cliente = userState.cliente;
       const precio = calcularPrecio(producto, cliente.lista || 1);
       
       const keyboard = [
         [
-          { text: '1️⃣ x1', callback_data: `cant|${productoId}|1|${paginaAnterior}|${categoriaId}` },
-          { text: '2️⃣ x2', callback_data: `cant|${productoId}|2|${paginaAnterior}|${categoriaId}` },
-          { text: '3️⃣ x3', callback_data: `cant|${productoId}|3|${paginaAnterior}|${categoriaId}` }
+          { text: '1️⃣ x1', callback_data: `cantidad_${productoId}_1` },
+          { text: '2️⃣ x2', callback_data: `cantidad_${productoId}_2` },
+          { text: '3️⃣ x3', callback_data: `cantidad_${productoId}_3` }
         ],
         [
-          { text: '4️⃣ x4', callback_data: `cant|${productoId}|4|${paginaAnterior}|${categoriaId}` },
-          { text: '5️⃣ x5', callback_data: `cant|${productoId}|5|${paginaAnterior}|${categoriaId}` },
-          { text: '🔢 Otra', callback_data: `custom|${productoId}|${paginaAnterior}|${categoriaId}` }
+          { text: '4️⃣ x4', callback_data: `cantidad_${productoId}_4` },
+          { text: '5️⃣ x5', callback_data: `cantidad_${productoId}_5` },
+          { text: '🔢 Otra cantidad', callback_data: `cantidad_custom_${productoId}` }
         ],
-        [{ text: '🔙 Volver', callback_data: `cat|${categoriaId}|${paginaAnterior}` }]
+        [{ text: '🔙 Volver', callback_data: `categoria_${producto.categoria_id}` }]
       ];
       
       await ctx.editMessageText(
@@ -848,37 +531,66 @@ bot.on('callback_query', async (ctx) => {
         { reply_markup: { inline_keyboard: keyboard } }
       );
       
-    } else if (callbackData.startsWith('cant|')) {
-      const [, productoId, cantidad, paginaAnterior, categoriaId] = callbackData.split('|').map(Number);
+    } else if (callbackData.startsWith('cantidad_')) {
+      const parts = callbackData.split('_');
       
-      console.log(`📦 [cant] Agregando al carrito: producto=${productoId}, cantidad=${cantidad}`);
+      if (parts[1] === 'custom') {
+        const productoId = parseInt(parts[2]);
+        setUserState(userId, { 
+          ...getUserState(userId), 
+          step: 'cantidad_custom', 
+          producto_id: productoId 
+        });
+        
+        await ctx.editMessageText('🔢 Escribe la cantidad que deseas:');
+        return;
+      }
+      
+      const productoId = parseInt(parts[1]);
+      const cantidad = parseInt(parts[2]);
       
       console.log(`📦 Carrito: +${cantidad} producto ${productoId}`);
       
-      const productos = await obtenerDatosSheet('Productos');
-      const producto = productos.find(p => p.producto_id == productoId);
+      const connection = await pool.getConnection();
+      let productos = [];
+      try {
+        const [result] = await connection.execute(
+          'SELECT producto_id, categoria_id, producto_nombre, precio1, precio2, precio3, precio4, precio5 FROM Productos WHERE producto_id = ?',
+          [productoId]
+        );
+        productos = result;
+      } catch (error) {
+        console.error('❌ Error obteniendo producto para carrito:', error.code || error.message);
+        await ctx.reply('❌ Error agregando al carrito. Intenta nuevamente.');
+        return;
+      } finally {
+        connection.release();
+      }
       
-      if (!producto) {
+      if (productos.length === 0) {
         await ctx.reply('❌ Producto no encontrado');
         return;
       }
       
+      const producto = productos[0];
       const userState = getUserState(userId);
       const cliente = userState.cliente;
       const precio = calcularPrecio(producto, cliente.lista || 1);
+      const importe = precio * cantidad;
       
-      const resultado = agregarProductoAlCarrito(userId, producto, cantidad, precio);
-      
-      if (!resultado.success) {
-        console.log(`❌ [cant] Error agregando al carrito: ${resultado.message}`);
-        await ctx.reply(`❌ ${resultado.message}`);
-        return;
-      }
-      
-      console.log(`✅ [cant] Producto agregado exitosamente: ${resultado.message}`);
+      const cart = getUserCart(userId);
+      cart.push({
+        producto_id: productoId,
+        producto_nombre: producto.producto_nombre,
+        categoria_id: producto.categoria_id,
+        cantidad: cantidad,
+        precio_unitario: precio,
+        importe: importe
+      });
+      setUserCart(userId, cart);
       
       await ctx.reply(
-        `✅ ${resultado.message}\n🛍️ ${producto.producto_nombre}\n📦 Cantidad: ${cantidad}\n💰 Subtotal: $${(precio * cantidad).toLocaleString()}\n\n🛒 Total carrito: ${resultado.totalItems} items - $${resultado.totalImporte.toLocaleString()}`,
+        `✅ Agregado al carrito:\n🛍️ ${producto.producto_nombre}\n📦 Cantidad: ${cantidad}\n💰 Subtotal: $${importe.toLocaleString()}\n\n¿Qué más necesitas?`,
         {
           reply_markup: {
             inline_keyboard: [
@@ -890,123 +602,119 @@ bot.on('callback_query', async (ctx) => {
         }
       );
       
-    } else if (callbackData.startsWith('custom|')) {
-      const [, productoId, paginaAnterior, categoriaId] = callbackData.split('|').map(Number);
+    } else if (callbackData === 'ver_carrito') {
+      const cart = getUserCart(userId);
       
-      console.log(`🔢 [custom] Cantidad personalizada para producto ${productoId}`);
-      
-      const productos = await obtenerDatosSheet('Productos');
-      const producto = productos.find(p => p.producto_id == productoId);
-      
-      if (!producto) {
-        await ctx.reply('❌ Producto no encontrado');
+      if (cart.length === 0) {
+        await ctx.reply('🛒 Tu carrito está vacío', {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
+            ]
+          }
+        });
         return;
       }
       
-      // Guardar información del producto en el estado para usar después
-      setUserState(userId, { 
-        ...getUserState(userId), 
-        step: 'cantidad_custom', 
-        producto_id: productoId,
-        pagina_anterior: paginaAnterior,
-        categoria_id: categoriaId
+      let mensaje = '🛒 *Tu carrito:*\n\n';
+      let total = 0;
+      
+      cart.forEach((item, index) => {
+        mensaje += `${index + 1}. *${item.producto_nombre}*\n`;
+        mensaje += `   📦 Cantidad: ${item.cantidad}\n`;
+        mensaje += `   💰 $${item.precio_unitario.toLocaleString()} c/u = $${item.importe.toLocaleString()}\n\n`;
+        total += item.importe;
       });
       
-      const userState = getUserState(userId);
-      const cliente = userState.cliente;
-      const precio = calcularPrecio(producto, cliente.lista || 1);
+      mensaje += `💰 *Total: $${total.toLocaleString()}*`;
       
-      await ctx.editMessageText(
-        `🔢 Cantidad personalizada\n\n🛍️ ${producto.producto_nombre}\n💰 Precio: $${precio.toLocaleString()}\n\n✏️ Escribe la cantidad que deseas:`
-      );
+      // Crear botones para eliminar productos individuales
+      const keyboard = [];
       
-    } else if (callbackData === 'ver_carrito') {
-      await displayCart(ctx, userId, false);
-      
-    } else if (callbackData === 'edit_cart') {
-      console.log(`✏️ ${userName} entra en modo edición del carrito`);
-      setUserState(userId, { ...getUserState(userId), editing_cart: true });
-      await displayCart(ctx, userId, true);
-      
-    } else if (callbackData === 'done_editing_cart') {
-      console.log(`✅ ${userName} termina edición del carrito`);
-      setUserState(userId, { ...getUserState(userId), editing_cart: false });
-      await displayCart(ctx, userId, false);
-      
-    } else if (callbackData.startsWith('edit_qty_plus|')) {
-      const index = parseInt(callbackData.split('|')[1]);
-      const cart = getUserCart(userId);
-      
-      if (index >= 0 && index < cart.length) {
-        if (cart[index].cantidad >= 999) {
-          await ctx.answerCbQuery('❌ Cantidad máxima alcanzada (999)', { show_alert: true });
-          return;
-        }
+      // Agregar botón de eliminar para cada producto (máximo 10)
+      if (cart.length <= 10) {
+        cart.forEach((item, index) => {
+          keyboard.push([{
+            text: `🗑️ Eliminar: ${item.producto_nombre.substring(0, 25)}${item.producto_nombre.length > 25 ? '...' : ''}`,
+            callback_data: `eliminar_item_${index}`
+          }]);
+        });
         
-        cart[index].cantidad += 1;
-        cart[index].importe = cart[index].precio_unitario * cart[index].cantidad;
-        setUserCart(userId, cart);
-        
-        console.log(`➕ ${userName} aumenta cantidad de ${cart[index].producto_nombre} a ${cart[index].cantidad}`);
-        await displayCart(ctx, userId, true);
+        // Separador visual
+        keyboard.push([{ text: '── ACCIONES ──', callback_data: 'separator' }]);
       }
       
-    } else if (callbackData.startsWith('edit_qty_minus|')) {
-      const index = parseInt(callbackData.split('|')[1]);
+      // Botones principales
+      keyboard.push([{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }]);
+      keyboard.push([{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]);
+      keyboard.push([{ text: '🗑️ Vaciar carrito', callback_data: 'vaciar_carrito' }]);
+      
+      await ctx.reply(mensaje, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: keyboard }
+      });
+      
+    } else if (callbackData.startsWith('eliminar_item_')) {
+      const itemIndex = parseInt(callbackData.split('_')[2]);
       const cart = getUserCart(userId);
       
-      if (index >= 0 && index < cart.length) {
-        cart[index].cantidad -= 1;
-        
-        if (cart[index].cantidad <= 0) {
-          console.log(`🗑️ ${userName} elimina ${cart[index].producto_nombre} (cantidad = 0)`);
-          cart.splice(index, 1);
-        } else {
-          cart[index].importe = cart[index].precio_unitario * cart[index].cantidad;
-          console.log(`➖ ${userName} reduce cantidad de ${cart[index].producto_nombre} a ${cart[index].cantidad}`);
-        }
-        
-        setUserCart(userId, cart);
-        await displayCart(ctx, userId, true);
+      if (itemIndex < 0 || itemIndex >= cart.length) {
+        await ctx.reply('❌ Producto no encontrado en el carrito');
+        return;
       }
       
-    } else if (callbackData.startsWith('remove_item|')) {
-      const index = parseInt(callbackData.split('|')[1]);
-      const cart = getUserCart(userId);
+      const itemEliminado = cart[itemIndex];
+      console.log(`🗑️ ${userName} elimina: ${itemEliminado.producto_nombre}`);
       
-      if (index >= 0 && index < cart.length) {
-        const itemEliminado = cart[index];
-        console.log(`🗑️ ${userName} elimina completamente: ${itemEliminado.producto_nombre}`);
-        
-        cart.splice(index, 1);
-        setUserCart(userId, cart);
-        
-        const userState = getUserState(userId);
-        const isEditing = userState.editing_cart || false;
-        
-        if (cart.length === 0) {
-          setUserState(userId, { ...userState, editing_cart: false });
-          await ctx.editMessageText('🗑️ Producto eliminado. Tu carrito está vacío.', {
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
-              ]
-            }
-          });
-        } else {
-          await displayCart(ctx, userId, isEditing);
-        }
+      // Eliminar el producto del carrito
+      cart.splice(itemIndex, 1);
+      setUserCart(userId, cart);
+      
+      if (cart.length === 0) {
+        await ctx.editMessageText('🗑️ Producto eliminado. Tu carrito está vacío.', {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
+            ]
+          }
+        });
+        return;
       }
       
-    } else if (callbackData === 'empty_cart') {
-      setUserCart(userId, []);
-      setUserState(userId, { ...getUserState(userId), editing_cart: false });
-      await ctx.editMessageText('🗑️ Carrito vaciado', {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
-          ]
-        }
+      // Mostrar carrito actualizado
+      let mensaje = '✅ Producto eliminado\n\n🛒 *Tu carrito actualizado:*\n\n';
+      let total = 0;
+      
+      cart.forEach((item, index) => {
+        mensaje += `${index + 1}. *${item.producto_nombre}*\n`;
+        mensaje += `   📦 Cantidad: ${item.cantidad}\n`;
+        mensaje += `   💰 $${item.precio_unitario.toLocaleString()} c/u = $${item.importe.toLocaleString()}\n\n`;
+        total += item.importe;
+      });
+      
+      mensaje += `💰 *Total: $${total.toLocaleString()}*`;
+      
+      // Crear botones actualizados
+      const keyboard = [];
+      
+      if (cart.length <= 10) {
+        cart.forEach((item, index) => {
+          keyboard.push([{
+            text: `🗑️ Eliminar: ${item.producto_nombre.substring(0, 25)}${item.producto_nombre.length > 25 ? '...' : ''}`,
+            callback_data: `eliminar_item_${index}`
+          }]);
+        });
+        
+        keyboard.push([{ text: '── ACCIONES ──', callback_data: 'separator' }]);
+      }
+      
+      keyboard.push([{ text: '➕ Seguir comprando', callback_data: 'seguir_comprando' }]);
+      keyboard.push([{ text: '✅ Finalizar pedido', callback_data: 'finalizar_pedido' }]);
+      keyboard.push([{ text: '🗑️ Vaciar carrito', callback_data: 'vaciar_carrito' }]);
+      
+      await ctx.editMessageText(mensaje, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: keyboard }
       });
       
     } else if (callbackData === 'finalizar_pedido') {
@@ -1017,6 +725,7 @@ bot.on('callback_query', async (ctx) => {
         return;
       }
       
+      // Preguntar por observaciones antes de finalizar
       setUserState(userId, { 
         ...getUserState(userId), 
         step: 'pregunta_observacion' 
@@ -1042,13 +751,24 @@ bot.on('callback_query', async (ctx) => {
     } else if (callbackData === 'finalizar_sin_observacion') {
       await confirmarPedido(ctx, userId, '');
       
-    } else if (callbackData === 'noop') {
-      // No hacer nada, es solo informativo
-      return;
+    } else if (callbackData === 'vaciar_carrito') {
+      setUserCart(userId, []);
+      await ctx.reply('🗑️ Carrito vaciado', {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🛍️ Empezar a comprar', callback_data: 'seguir_comprando' }]
+          ]
+        }
+      });
       
-    } else if (callbackData === 'separator') {
-      // No hacer nada, es solo visual
-      return;
+    } else if (callbackData.startsWith('buscar_producto_')) {
+      const categoriaId = parseInt(callbackData.split('_')[2]);
+      setUserState(userId, { 
+        ...getUserState(userId), 
+        step: 'buscar_producto',
+        categoria_busqueda: categoriaId
+      });
+      await ctx.reply('🔍 Escribe el nombre del producto que buscas:');
     }
     
   } catch (error) {
@@ -1068,69 +788,44 @@ bot.on('text', async (ctx) => {
   
   try {
     if (userState.step === 'cantidad_custom') {
-      console.log(`🔢 [cantidad_custom] Usuario ${userName} ingresó: "${text}"`);
-      
       const cantidad = parseInt(text);
       
-      console.log(`🔢 [cantidad_custom] Cantidad parseada: ${cantidad}`);
-      
       if (isNaN(cantidad) || cantidad <= 0) {
-        console.log(`❌ [cantidad_custom] Cantidad inválida: ${cantidad}`);
         await ctx.reply('❌ Por favor ingresa un número válido mayor a 0');
         return;
       }
       
-      if (cantidad > 999) {
-        console.log(`❌ [cantidad_custom] Cantidad excede máximo: ${cantidad}`);
-        await ctx.reply('❌ La cantidad máxima permitida es 999 unidades');
-        return;
-      }
-      
       const productoId = userState.producto_id;
-      console.log(`🔍 [cantidad_custom] Buscando producto ID: ${productoId}`);
+      const [productos] = await pool.execute(
+        'SELECT producto_id, categoria_id, producto_nombre, precio1, precio2, precio3, precio4, precio5 FROM Productos WHERE producto_id = ?',
+        [productoId]
+      );
       
-      const productos = await obtenerDatosSheet('Productos');
-      const producto = productos.find(p => p.producto_id == productoId);
-      
-      if (!producto) {
-        console.log(`❌ [cantidad_custom] Producto no encontrado: ${productoId}`);
+      if (productos.length === 0) {
         await ctx.reply('❌ Producto no encontrado');
         return;
       }
       
-      console.log(`✅ [cantidad_custom] Producto encontrado: ${producto.producto_nombre}`);
-      
+      const producto = productos[0];
       const cliente = userState.cliente;
-      if (!cliente) {
-        console.log(`❌ [cantidad_custom] Cliente no encontrado en estado`);
-        await ctx.reply('❌ Error: Cliente no encontrado. Reinicia con /start');
-        return;
-      }
-      
       const precio = calcularPrecio(producto, cliente.lista || 1);
-      console.log(`💰 [cantidad_custom] Precio calculado: ${precio} (lista ${cliente.lista || 1})`);
+      const importe = precio * cantidad;
       
-      const resultado = agregarProductoAlCarrito(userId, producto, cantidad, precio);
-      
-      if (!resultado.success) {
-        console.log(`❌ [cantidad_custom] Error agregando al carrito: ${resultado.message}`);
-        await ctx.reply(`❌ ${resultado.message}`);
-        return;
-      }
-      
-      console.log(`✅ [cantidad_custom] Producto agregado exitosamente`);
-      
-      // Limpiar estado de cantidad personalizada
-      setUserState(userId, { 
-        ...userState, 
-        step: 'seleccionar_categoria',
-        producto_id: undefined,
-        pagina_anterior: undefined,
-        categoria_id: undefined
+      const cart = getUserCart(userId);
+      cart.push({
+        producto_id: productoId,
+        producto_nombre: producto.producto_nombre,
+        categoria_id: producto.categoria_id,
+        cantidad: cantidad,
+        precio_unitario: precio,
+        importe: importe
       });
+      setUserCart(userId, cart);
+      
+      setUserState(userId, { ...userState, step: 'seleccionar_categoria' });
       
       await ctx.reply(
-        `✅ ${resultado.message}\n🛍️ ${producto.producto_nombre}\n📦 Cantidad: ${cantidad}\n💰 Subtotal: $${(precio * cantidad).toLocaleString()}\n\n🛒 Total carrito: ${resultado.totalItems} items - $${resultado.totalImporte.toLocaleString()}`,
+        `✅ Agregado al carrito:\n🛍️ ${producto.producto_nombre}\n📦 Cantidad: ${cantidad}\n💰 Subtotal: $${importe.toLocaleString()}\n\n¿Qué más necesitas?`,
         {
           reply_markup: {
             inline_keyboard: [
@@ -1150,13 +845,23 @@ bot.on('text', async (ctx) => {
         return;
       }
       
-      const clientes = await obtenerDatosSheet('Clientes');
-      const clientesFiltrados = clientes.filter(cliente => {
-        const nombre = (cliente.nombre || cliente.Nombre || '').toLowerCase();
-        return nombre.includes(termino);
-      });
+      const connection = await pool.getConnection();
+      let clientes = [];
+      try {
+        const [result] = await connection.execute(
+          'SELECT cliente_id, nombre, lista, localidad FROM Clientes WHERE LOWER(nombre) LIKE ? ORDER BY nombre',
+          [`%${termino}%`]
+        );
+        clientes = result;
+      } catch (error) {
+        console.error('❌ Error buscando clientes:', error.code || error.message);
+        await ctx.reply('❌ Error en la búsqueda. Intenta nuevamente.');
+        return;
+      } finally {
+        connection.release();
+      }
       
-      if (clientesFiltrados.length === 0) {
+      if (clientes.length === 0) {
         await ctx.reply(`❌ No se encontraron clientes con "${text}"`, {
           reply_markup: {
             inline_keyboard: [
@@ -1168,20 +873,15 @@ bot.on('text', async (ctx) => {
         return;
       }
       
-      const keyboard = clientesFiltrados.map(cliente => {
-        const nombreCliente = cliente.nombre || cliente.Nombre || `Cliente ${cliente.cliente_id}`;
-        const clienteId = cliente.cliente_id || cliente.Cliente_id || cliente.id;
-        
-        return [{
-          text: `👤 ${nombreCliente}`,
-          callback_data: `cliente_${clienteId}`
-        }];
-      });
+      const keyboard = clientes.map(cliente => [{
+        text: `👤 ${cliente.nombre}`,
+        callback_data: `cliente_${cliente.cliente_id}`
+      }]);
       
       keyboard.push([{ text: '🔍 Buscar de nuevo', callback_data: 'buscar_cliente' }]);
       keyboard.push([{ text: '👥 Ver todos', callback_data: 'hacer_pedido' }]);
       
-      await ctx.reply(`🔍 Encontrados ${clientesFiltrados.length} cliente(s):`, {
+      await ctx.reply(`🔍 Encontrados ${clientes.length} cliente(s):`, {
         reply_markup: { inline_keyboard: keyboard }
       });
       
@@ -1193,25 +893,61 @@ bot.on('text', async (ctx) => {
         return;
       }
       
-      const productos = await obtenerDatosSheet('Productos');
-      console.log(`🔍 [buscar_producto] Productos obtenidos:`, typeof productos, Array.isArray(productos) ? productos.length : 'no es array');
-      
       const categoriaId = userState.categoria_busqueda;
-      const productosFiltrados = buscarProductos(productos, termino, categoriaId);
       
-      if (productosFiltrados.length === 0) {
+      let query = 'SELECT producto_id, categoria_id, producto_nombre, precio1, precio2, precio3, precio4, precio5 FROM Productos WHERE LOWER(producto_nombre) LIKE ? AND activo = "SI"';
+      let params = [`%${termino}%`];
+      
+      if (categoriaId) {
+        query += ' AND categoria_id = ?';
+        params.push(categoriaId);
+      }
+      
+      query += ' ORDER BY producto_nombre';
+      
+      const connection = await pool.getConnection();
+      let productos = [];
+      try {
+        const [result] = await connection.execute(query, params);
+        productos = result;
+      } catch (error) {
+        console.error('❌ Error buscando productos:', error.code || error.message);
+        await ctx.reply('❌ Error en la búsqueda. Intenta nuevamente.');
+        return;
+      } finally {
+        connection.release();
+      }
+      
+      if (productos.length === 0) {
         await ctx.reply(`❌ No se encontraron productos con "${text}"`, {
           reply_markup: {
             inline_keyboard: [
-              [{ text: '🔍 Buscar de nuevo', callback_data: `buscar|${categoriaId || 0}` }],
-              [{ text: '📂 Ver categorías', callback_data: 'seguir_comprando' }]
+              [{ text: '🔍 Buscar de nuevo', callback_data: `buscar_producto_${categoriaId || 'general'}` }],
+              [{ text: '📂 Ver categoría', callback_data: `categoria_${categoriaId}` }]
             ]
           }
         });
         return;
       }
       
-      await mostrarProductosPaginados(ctx, productosFiltrados, 1, categoriaId, termino);
+      const keyboard = productos.map(producto => [{
+        text: `🛍️ ${producto.producto_nombre}`,
+        callback_data: `producto_${producto.producto_id}`
+      }]);
+      
+      const botonesBusquedaExitosa = categoriaId ? [
+        [{ text: '🔍 Buscar de nuevo', callback_data: `buscar_producto_${categoriaId}` }],
+        [{ text: '📂 Ver categoría', callback_data: `categoria_${categoriaId}` }]
+      ] : [
+        [{ text: '🔍 Buscar de nuevo', callback_data: 'buscar_producto_general' }],
+        [{ text: '📂 Ver categorías', callback_data: 'seguir_comprando' }]
+      ];
+      
+      keyboard.push(...botonesBusquedaExitosa);
+      
+      await ctx.reply(`🔍 Encontrados ${productos.length} producto(s):`, {
+        reply_markup: { inline_keyboard: keyboard }
+      });
       
     } else if (userState.step === 'escribir_observacion') {
       const observacion = text.trim();
@@ -1228,9 +964,11 @@ bot.on('text', async (ctx) => {
       
       console.log(`📝 Observación de ${userName}: "${observacion}"`);
       
+      // Confirmar pedido con observación
       await confirmarPedido(ctx, userId, observacion);
       
     } else {
+      // Mensaje no reconocido
       await ctx.reply(
         '❓ No entiendo ese mensaje. Usa /start para comenzar o los botones del menú.',
         {
@@ -1264,10 +1002,12 @@ async function confirmarPedido(ctx, userId, observacion = '') {
     
     console.log(`✅ Confirmando pedido ${pedidoId} para ${cliente.nombre}${observacion ? ' con observación' : ''}`);
     
+    // Calcular totales
     const itemsTotal = cart.reduce((sum, item) => sum + item.cantidad, 0);
     const montoTotal = cart.reduce((sum, item) => sum + item.importe, 0);
     
-    const fechaHora = new Date().toISOString();
+    // Crear pedido en MySQL
+    const fechaHora = new Date().toISOString().slice(0, 19).replace('T', ' ');
     
     const pedidoData = [
       pedidoId,
@@ -1280,8 +1020,9 @@ async function confirmarPedido(ctx, userId, observacion = '') {
       observacion
     ];
     
-    await agregarDatosSheet('Pedidos', pedidoData);
+    await agregarDatosMySQL('Pedidos', pedidoData);
     
+    // Crear detalles del pedido
     for (let i = 0; i < cart.length; i++) {
       const item = cart[i];
       const detalleId = `${pedidoId}_${i + 1}`;
@@ -1294,15 +1035,18 @@ async function confirmarPedido(ctx, userId, observacion = '') {
         item.categoria_id,
         item.cantidad,
         item.precio_unitario,
-        item.importe
+        item.importe,
+        ''
       ];
       
-      await agregarDatosSheet('DetallePedidos', detalleData);
+      await agregarDatosMySQL('DetallePedidos', detalleData);
     }
     
+    // Limpiar estado del usuario
     setUserState(userId, { step: 'idle' });
     setUserCart(userId, []);
     
+    // Mensaje de confirmación
     let mensaje = `✅ *Pedido registrado*\n\n`;
     mensaje += `📋 ID: ${pedidoId}\n`;
     mensaje += `👤 Cliente: ${cliente.nombre}\n`;
@@ -1311,7 +1055,7 @@ async function confirmarPedido(ctx, userId, observacion = '') {
     mensaje += `💰 Total: $${montoTotal.toLocaleString()}\n\n`;
     
     if (observacion) {
-      mensaje += `📝 Observación: ${observacion}\n`;
+      mensaje += `📝 Observación: ${observacion}\n\n`;
     }
     
     mensaje += `⏳ Estado: PENDIENTE\n\n`;
@@ -1327,7 +1071,7 @@ async function confirmarPedido(ctx, userId, observacion = '') {
       }
     });
     
-    console.log(`✅ Pedido ${pedidoId} guardado exitosamente`);
+    console.log(`✅ Pedido ${pedidoId} guardado exitosamente en MySQL`);
     
   } catch (error) {
     console.error('❌ Error confirmando pedido:', error);
@@ -1338,7 +1082,7 @@ async function confirmarPedido(ctx, userId, observacion = '') {
 // Configurar webhook
 app.post('/webhook', (req, res) => {
   try {
-    console.log('📨 Webhook recibido');
+    console.log('📨 Webhook recibido:', JSON.stringify(req.body, null, 2));
     bot.handleUpdate(req.body);
     res.status(200).send('OK');
   } catch (error) {
@@ -1353,18 +1097,20 @@ app.get('/health', (req, res) => {
     status: 'OK',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    port: PORT
+    port: PORT,
+    database: 'MySQL'
   });
 });
 
 app.get('/api/info', (req, res) => {
   res.json({
     name: 'Sistema Distribuidora Bot',
-    version: '1.0.0',
+    version: '2.0.0',
     status: 'running',
+    database: 'MySQL',
     features: [
       'Bot de Telegram',
-      'Integración Google Sheets',
+      'Integración MySQL',
       'Sistema de pedidos',
       'Carrito de compras'
     ]
@@ -1373,7 +1119,7 @@ app.get('/api/info', (req, res) => {
 
 app.get('/api/clientes', async (req, res) => {
   try {
-    const clientes = await obtenerDatosSheet('Clientes');
+    const clientes = await obtenerDatosMySQL('Clientes');
     res.json({ success: true, clientes });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1382,7 +1128,7 @@ app.get('/api/clientes', async (req, res) => {
 
 app.get('/api/productos', async (req, res) => {
   try {
-    const productos = await obtenerDatosSheet('Productos');
+    const productos = await obtenerDatosMySQL('Productos');
     res.json({ success: true, productos });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1391,7 +1137,7 @@ app.get('/api/productos', async (req, res) => {
 
 app.get('/api/detalles-pedidos', async (req, res) => {
   try {
-    const detalles = await obtenerDatosSheet('DetallePedidos');
+    const detalles = await obtenerDatosMySQL('DetallePedidos');
     res.json({ success: true, detalles });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1399,55 +1145,83 @@ app.get('/api/detalles-pedidos', async (req, res) => {
 });
 
 app.get('/api/pedidos-completos', async (req, res) => {
+  // Verificar conexión primero
+  const conexionDisponible = await verificarConexionMySQL();
+  if (!conexionDisponible) {
+    return res.status(503).json({ 
+      success: false, 
+      error: 'Base de datos no disponible. Verifica la configuración de MySQL.',
+      database: 'MySQL (no disponible)',
+      fallback: true
+    });
+  }
+
   try {
-    console.log('📊 Obteniendo pedidos completos...');
+    console.log('📊 Obteniendo pedidos completos desde MySQL...');
     
-    const pedidos = await obtenerDatosSheet('Pedidos');
-    const detalles = await obtenerDatosSheet('DetallePedidos');
+    const connection = await pool.getConnection();
+    let pedidosCompletos = [];
     
-    console.log(`📋 Pedidos: ${pedidos.length}, Detalles: ${detalles.length}`);
-    
-    const pedidosCompletos = pedidos.map(pedido => {
-      const pedidoId = pedido.pedido_id;
+    try {
+      // Obtener pedidos con sus detalles usando JOIN
+      const [result] = await connection.execute(`
+        SELECT 
+          p.pedido_id,
+          p.fecha_hora,
+          p.cliente_id,
+          p.cliente_nombre,
+          p.items_cantidad,
+          p.total,
+          p.estado,
+          p.observacion,
+          COUNT(d.detalle_id) as cantidad_items_real,
+          SUM(d.importe) as total_calculado
+        FROM Pedidos p
+        LEFT JOIN DetallePedidos d ON p.pedido_id = d.pedido_id
+        GROUP BY p.pedido_id
+        ORDER BY p.fecha_hora DESC
+      `);
+      pedidosCompletos = result;
       
-      const detallesPedido = detalles.filter(detalle => 
-        detalle.pedido_id === pedidoId
-      );
+      // Obtener detalles para cada pedido
+      for (const pedido of pedidosCompletos) {
+        const [detalles] = await connection.execute(
+          'SELECT detalle_id, producto_id, producto_nombre, categoria_id, cantidad, precio_unitario, importe, observaciones FROM DetallePedidos WHERE pedido_id = ? ORDER BY detalle_id',
+          [pedido.pedido_id]
+        );
+        pedido.detalles = detalles;
+      }
       
-      const totalCalculado = detallesPedido.reduce((sum, detalle) => {
-        const importe = parseFloat(detalle.importe) || 0;
-        return sum + importe;
-      }, 0);
-      
-      const totalFinal = parseFloat(pedido.total) || totalCalculado;
-      
-      return {
-        ...pedido,
-        total: totalFinal,
-        total_calculado: totalCalculado,
-        detalles: detallesPedido,
-        cantidad_items: detallesPedido.length
-      };
-    });
+    } finally {
+      connection.release();
+    }
     
-    pedidosCompletos.sort((a, b) => {
-      const fechaA = new Date(a.fecha_hora || 0);
-      const fechaB = new Date(b.fecha_hora || 0);
-      return fechaB - fechaA;
-    });
-    
-    console.log(`✅ ${pedidosCompletos.length} pedidos completos procesados`);
+    console.log(`✅ ${pedidosCompletos.length} pedidos completos procesados desde MySQL`);
     
     res.json({ 
       success: true, 
       pedidos: pedidosCompletos,
       total_pedidos: pedidosCompletos.length,
-      total_detalles: detalles.length
+      database: 'MySQL'
     });
     
   } catch (error) {
-    console.error('❌ Error obteniendo pedidos completos:', error);
-    res.status(500).json({ success: false, error: error.message });
+    console.error('❌ Error obteniendo pedidos completos:', error.code || error.message);
+    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+      console.error('🔌 Problema de conexión con MySQL. Verifica la configuración de red.');
+      res.status(503).json({ 
+        success: false, 
+        error: 'Error de conexión con la base de datos. Verifica la configuración.',
+        code: error.code,
+        database: 'MySQL (error de conexión)'
+      });
+    } else {
+      res.status(500).json({ 
+        success: false, 
+        error: error.message,
+        database: 'MySQL (error interno)'
+      });
+    }
   }
 });
 
@@ -1466,6 +1240,7 @@ app.put('/api/pedidos/:pedidoId/estado', async (req, res) => {
       });
     }
     
+    // Validar estados permitidos
     const estadosPermitidos = ['PENDIENTE', 'CONFIRMADO', 'CANCELADO'];
     if (!estadosPermitidos.includes(estado.toUpperCase())) {
       return res.status(400).json({ 
@@ -1474,274 +1249,72 @@ app.put('/api/pedidos/:pedidoId/estado', async (req, res) => {
       });
     }
     
-    if (!SPREADSHEET_ID) {
-      console.log(`⚠️ Google Sheets no configurado, simulando actualización`);
-      return res.json({ 
-        success: true, 
-        message: `Estado simulado actualizado a ${estado}`,
-        pedido_id: pedidoId,
-        nuevo_estado: estado
-      });
-    }
-    
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'Pedidos!A:Z',
-    });
-    
-    const rows = response.data.values || [];
-    if (rows.length === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'No se encontraron pedidos' 
-      });
-    }
-    
-    const headers = rows[0];
-    const estadoColumnIndex = headers.findIndex(header => 
-      header.toLowerCase() === 'estado'
-    );
-    
-    if (estadoColumnIndex === -1) {
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Columna estado no encontrada' 
-      });
-    }
-    
-    let filaEncontrada = -1;
-    for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0] === pedidoId) {
-        filaEncontrada = i;
-        break;
+    const connection = await pool.getConnection();
+    try {
+      // Verificar que el pedido existe
+      const [pedidos] = await connection.execute(
+        'SELECT pedido_id FROM Pedidos WHERE pedido_id = ?',
+        [pedidoId]
+      );
+      
+      if (pedidos.length === 0) {
+        return res.status(404).json({ 
+          success: false, 
+          error: `Pedido ${pedidoId} no encontrado` 
+        });
       }
+      
+      // Actualizar el estado en MySQL
+      await connection.execute(
+        'UPDATE Pedidos SET estado = ? WHERE pedido_id = ?',
+        [estado.toUpperCase(), pedidoId]
+      );
+      
+    } finally {
+      connection.release();
     }
     
-    if (filaEncontrada === -1) {
-      return res.status(404).json({ 
-        success: false, 
-        error: `Pedido ${pedidoId} no encontrado` 
-      });
-    }
-    
-    const estadoColumn = String.fromCharCode(65 + estadoColumnIndex);
-    const range = `Pedidos!${estadoColumn}${filaEncontrada + 1}`;
-    
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: range,
-      valueInputOption: 'RAW',
-      requestBody: {
-        values: [[estado.toUpperCase()]]
-      }
-    });
-    
-    console.log(`✅ Pedido ${pedidoId} actualizado a ${estado}`);
+    console.log(`✅ Pedido ${pedidoId} actualizado a ${estado} en MySQL`);
     
     res.json({ 
       success: true, 
       message: `Estado actualizado exitosamente`,
       pedido_id: pedidoId,
       nuevo_estado: estado.toUpperCase(),
-      fila_actualizada: filaEncontrada + 1
+      database: 'MySQL'
     });
     
   } catch (error) {
-    console.error('❌ Error actualizando estado:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    console.error('❌ Error actualizando estado:', error.code || error.message);
+    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED') {
+      res.status(503).json({ 
+        success: false, 
+        error: 'Error de conexión con la base de datos. Verifica la configuración.',
+        code: error.code
+      });
+    } else {
+      res.status(500).json({ 
+        success: false, 
+        error: error.message 
+      });
+    }
   }
 });
 
-// Endpoint para cargar clientes desde XLSX
-app.post('/api/upload-clientes-xlsx', upload.single('file'), async (req, res) => {
+// Test de conexión MySQL
+app.get('/api/test/mysql', async (req, res) => {
   try {
-    console.log('📤 Recibiendo archivo XLSX de clientes...');
+    const connection = await pool.getConnection();
+    const [rows] = await connection.execute('SELECT DATABASE() as db_name, NOW() as current_time');
+    connection.release();
     
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        error: 'No se recibió ningún archivo'
-      });
-    }
-    
-    console.log(`📁 Archivo recibido: ${req.file.originalname} (${req.file.size} bytes)`);
-    
-    // Procesar el archivo XLSX
-    const resultado = processXLSXFile(req.file.path);
-    
-    if (!resultado.success) {
-      return res.status(400).json({
-        success: false,
-        error: resultado.error
-      });
-    }
-    
-    const datos = resultado.data;
-    
-    if (datos.length < 2) {
-      return res.status(400).json({
-        success: false,
-        error: 'El archivo debe tener al menos encabezados y una fila de datos'
-      });
-    }
-    
-    // Validar que tenga las columnas necesarias
-    const encabezados = datos[0];
-    const columnasRequeridas = ['cliente_id', 'nombre'];
-    const columnasFaltantes = columnasRequeridas.filter(col => 
-      !encabezados.some(header => header.toLowerCase() === col.toLowerCase())
-    );
-    
-    if (columnasFaltantes.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: `Faltan columnas requeridas: ${columnasFaltantes.join(', ')}`
-      });
-    }
-    
-    console.log(`📋 Encabezados encontrados: ${encabezados.join(', ')}`);
-    console.log(`📊 ${datos.length - 1} filas de datos para procesar`);
-    
-    // Escribir datos a Google Sheets
-    const resultadoEscritura = await clearAndWriteSheet('Clientes', datos);
-    
-    // Limpiar archivo temporal
-    try {
-      const fs = await import('fs');
-      fs.unlinkSync(req.file.path);
-      console.log(`🗑️ Archivo temporal eliminado: ${req.file.path}`);
-    } catch (error) {
-      console.log(`⚠️ No se pudo eliminar archivo temporal: ${error.message}`);
-    }
-    
-    if (resultadoEscritura.success) {
-      console.log(`✅ Clientes cargados exitosamente desde ${req.file.originalname}`);
-      res.json({
-        success: true,
-        message: resultadoEscritura.message,
-        registros_procesados: datos.length - 1,
-        archivo_original: req.file.originalname
-      });
-    } else {
-      res.status(500).json({
-        success: false,
-        error: resultadoEscritura.error
-      });
-    }
-    
-  } catch (error) {
-    console.error('❌ Error en upload-clientes-xlsx:', error);
-    
-    // Limpiar archivo temporal en caso de error
-    if (req.file && req.file.path) {
-      try {
-        const fs = await import('fs');
-        fs.unlinkSync(req.file.path);
-      } catch (cleanupError) {
-        console.log(`⚠️ Error limpiando archivo temporal: ${cleanupError.message}`);
-      }
-    }
-    
-    res.status(500).json({
-      success: false,
-      error: error.message
+    res.json({
+      success: true,
+      database: rows[0].db_name,
+      current_time: rows[0].current_time,
+      message: 'Conexión MySQL exitosa'
     });
-  }
-});
-
-// Endpoint para cargar productos desde XLSX
-app.post('/api/upload-productos-xlsx', upload.single('file'), async (req, res) => {
-  try {
-    console.log('📤 Recibiendo archivo XLSX de productos...');
-    
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        error: 'No se recibió ningún archivo'
-      });
-    }
-    
-    console.log(`📁 Archivo recibido: ${req.file.originalname} (${req.file.size} bytes)`);
-    
-    // Procesar el archivo XLSX
-    const resultado = processXLSXFile(req.file.path);
-    
-    if (!resultado.success) {
-      return res.status(400).json({
-        success: false,
-        error: resultado.error
-      });
-    }
-    
-    const datos = resultado.data;
-    
-    if (datos.length < 2) {
-      return res.status(400).json({
-        success: false,
-        error: 'El archivo debe tener al menos encabezados y una fila de datos'
-      });
-    }
-    
-    // Validar que tenga las columnas necesarias
-    const encabezados = datos[0];
-    const columnasRequeridas = ['producto_id', 'categoria_id', 'producto_nombre'];
-    const columnasFaltantes = columnasRequeridas.filter(col => 
-      !encabezados.some(header => header.toLowerCase() === col.toLowerCase())
-    );
-    
-    if (columnasFaltantes.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: `Faltan columnas requeridas: ${columnasFaltantes.join(', ')}`
-      });
-    }
-    
-    console.log(`📋 Encabezados encontrados: ${encabezados.join(', ')}`);
-    console.log(`📊 ${datos.length - 1} filas de datos para procesar`);
-    
-    // Escribir datos a Google Sheets
-    const resultadoEscritura = await clearAndWriteSheet('Productos', datos);
-    
-    // Limpiar archivo temporal
-    try {
-      const fs = await import('fs');
-      fs.unlinkSync(req.file.path);
-      console.log(`🗑️ Archivo temporal eliminado: ${req.file.path}`);
-    } catch (error) {
-      console.log(`⚠️ No se pudo eliminar archivo temporal: ${error.message}`);
-    }
-    
-    if (resultadoEscritura.success) {
-      console.log(`✅ Productos cargados exitosamente desde ${req.file.originalname}`);
-      res.json({
-        success: true,
-        message: resultadoEscritura.message,
-        registros_procesados: datos.length - 1,
-        archivo_original: req.file.originalname
-      });
-    } else {
-      res.status(500).json({
-        success: false,
-        error: resultadoEscritura.error
-      });
-    }
-    
   } catch (error) {
-    console.error('❌ Error en upload-productos-xlsx:', error);
-    
-    // Limpiar archivo temporal en caso de error
-    if (req.file && req.file.path) {
-      try {
-        const fs = await import('fs');
-        fs.unlinkSync(req.file.path);
-      } catch (cleanupError) {
-        console.log(`⚠️ Error limpiando archivo temporal: ${cleanupError.message}`);
-      }
-    }
-    
     res.status(500).json({
       success: false,
       error: error.message
@@ -1750,11 +1323,20 @@ app.post('/api/upload-productos-xlsx', upload.single('file'), async (req, res) =
 });
 
 // Iniciar servidor
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Servidor iniciado en puerto ${PORT}`);
   console.log(`🌐 Dashboard: http://localhost:${PORT}`);
   console.log(`🤖 Bot de Telegram configurado`);
-  console.log(`📊 Google Sheets: ${SPREADSHEET_ID ? 'Configurado' : 'No configurado'}`);
+  
+  // Verificar conexión MySQL
+  try {
+    const connection = await pool.getConnection();
+    const [rows] = await connection.execute('SELECT DATABASE() as db_name');
+    console.log(`📊 MySQL conectado: ${rows[0].db_name}`);
+    connection.release();
+  } catch (error) {
+    console.error(`❌ Error conectando a MySQL: ${error.message}`);
+  }
 });
 
 // Manejo de errores
@@ -1764,4 +1346,17 @@ process.on('uncaughtException', (error) => {
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('❌ Promesa rechazada no manejada:', reason);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('🔄 Cerrando servidor...');
+  await pool.end();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('🔄 Cerrando servidor...');
+  await pool.end();
+  process.exit(0);
 });
