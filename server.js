@@ -886,11 +886,7 @@ bot.on('callback_query', async (ctx) => {
       setUserState(userId, { 
         ...getUserState(userId), 
         step: 'pregunta_observacion' 
-        producto_id: productoId,
-        pagina_anterior: paginaAnterior,
-        categoria_id: categoriaId
-      }
-      )
+      });
       
       await ctx.reply('📝 ¿Deseas agregar alguna observación al pedido?', {
         reply_markup: {
