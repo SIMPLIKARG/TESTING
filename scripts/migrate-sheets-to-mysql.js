@@ -7,7 +7,7 @@
 
 import { GoogleAuth } from 'google-auth-library';
 import { google } from 'googleapis';
-import mysql from 'mysql2/promise';
+import { createPool } from 'mysql2/promise';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -25,7 +25,7 @@ const sheets = google.sheets({ version: 'v4', auth });
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID;
 
 // Configuración de MySQL
-const pool = mysql.createPool({
+const pool = createPool({
   host: process.env.MYSQL_HOST,
   user: process.env.MYSQL_USER,
   password: process.env.MYSQL_PASSWORD,
