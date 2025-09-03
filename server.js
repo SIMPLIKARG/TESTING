@@ -49,18 +49,9 @@ async function verificarConexionMySQL() {
 
 // Datos de ejemplo como fallback
 const datosEjemplo = {
-  Clientes: [
-    { cliente_id: 1, nombre: 'Cliente Demo 1', lista: 1, localidad: 'Centro' },
-    { cliente_id: 2, nombre: 'Cliente Demo 2', lista: 2, localidad: 'Norte' }
-  ],
-  Categorias: [
-    { categoria_id: 1, categoria_nombre: 'Bebidas' },
-    { categoria_id: 2, categoria_nombre: 'Snacks' }
-  ],
-  Productos: [
-    { producto_id: 1, categoria_id: 1, producto_nombre: 'Coca Cola', precio1: 100, precio2: 95, precio3: 90, precio4: 85, precio5: 80, activo: 'SI' },
-    { producto_id: 2, categoria_id: 2, producto_nombre: 'Papas Fritas', precio1: 50, precio2: 48, precio3: 45, precio4: 42, precio5: 40, activo: 'SI' }
-  ]
+  Clientes: [],
+  Categorias: [],
+  Productos: []
 };
 
 // Bot de Telegram
@@ -98,13 +89,6 @@ function setSearchState(userId, state) {
 
 // Función para obtener datos de MySQL
 async function obtenerDatosMySQL(tabla) {
-  // Verificar conexión primero
-  const conexionDisponible = await verificarConexionMySQL();
-  if (!conexionDisponible) {
-    console.log(`⚠️ MySQL no disponible, usando datos de ejemplo para ${tabla}`);
-    return datosEjemplo[tabla] || [];
-  }
-
   try {
     console.log(`📊 Obteniendo datos de MySQL: ${tabla}...`);
     
@@ -117,7 +101,7 @@ async function obtenerDatosMySQL(tabla) {
         query = 'SELECT categoria_id, categoria_nombre FROM Categorias ORDER BY categoria_nombre';
         break;
       case 'Productos':
-        query = 'SELECT producto_id, categoria_id, producto_nombre, precio1, precio2, precio3, precio4, precio5, activo FROM Productos WHERE activo = "SI" ORDER BY producto_nombre';
+        query = 'SELECT producto_id, categoria_nombre, producto_nombre, precio1, precio2, precio3, precio4, precio5, activo FROM Productos WHERE activo = "SI" ORDER BY producto_nombre';
         break;
       case 'Pedidos':
         query = 'SELECT pedido_id, fecha_hora, cliente_id, cliente_nombre, items_cantidad, total, estado, observacion FROM Pedidos ORDER BY fecha_hora DESC';
@@ -140,12 +124,7 @@ async function obtenerDatosMySQL(tabla) {
     
   } catch (error) {
     console.error(`❌ Error obteniendo datos de ${tabla}:`, error.code || error.message);
-    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-      console.error('🔌 Problema de conexión con MySQL. Verifica la configuración de red.');
-      console.log(`⚠️ Usando datos de ejemplo para ${tabla}`);
-      return datosEjemplo[tabla] || [];
-    }
-    return datosEjemplo[tabla] || [];
+    throw error; // Re-lanzar el error para que sea manejado por el llamador
   }
 }
 
@@ -1145,17 +1124,6 @@ app.get('/api/detalles-pedidos', async (req, res) => {
 });
 
 app.get('/api/pedidos-completos', async (req, res) => {
-  // Verificar conexión primero
-  const conexionDisponible = await verificarConexionMySQL();
-  if (!conexionDisponible) {
-    return res.status(503).json({ 
-      success: false, 
-      error: 'Base de datos no disponible. Verifica la configuración de MySQL.',
-      database: 'MySQL (no disponible)',
-      fallback: true
-    });
-  }
-
   try {
     console.log('📊 Obteniendo pedidos completos desde MySQL...');
     
@@ -1186,7 +1154,7 @@ app.get('/api/pedidos-completos', async (req, res) => {
       // Obtener detalles para cada pedido
       for (const pedido of pedidosCompletos) {
         const [detalles] = await connection.execute(
-          'SELECT detalle_id, producto_id, producto_nombre, categoria_id, cantidad, precio_unitario, importe, observaciones FROM DetallePedidos WHERE pedido_id = ? ORDER BY detalle_id',
+          'SELECT detalle_id, producto_id, producto_nombre, categoria_nombre, cantidad, precio_unitario, importe, observaciones FROM DetallePedidos WHERE pedido_id = ? ORDER BY detalle_id',
           [pedido.pedido_id]
         );
         pedido.detalles = detalles;
@@ -1207,21 +1175,11 @@ app.get('/api/pedidos-completos', async (req, res) => {
     
   } catch (error) {
     console.error('❌ Error obteniendo pedidos completos:', error.code || error.message);
-    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-      console.error('🔌 Problema de conexión con MySQL. Verifica la configuración de red.');
-      res.status(503).json({ 
-        success: false, 
-        error: 'Error de conexión con la base de datos. Verifica la configuración.',
-        code: error.code,
-        database: 'MySQL (error de conexión)'
-      });
-    } else {
-      res.status(500).json({ 
-        success: false, 
-        error: error.message,
-        database: 'MySQL (error interno)'
-      });
-    }
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      database: 'MySQL'
+    });
   }
 });
 
